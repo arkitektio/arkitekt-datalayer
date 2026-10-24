@@ -1,0 +1,67 @@
+[project]
+name = "arkitekt-datalayer"
+version = "0.0.0"
+description = "S3-backed stores for arkitekt services: bookkeeping rows, scoped upload/read grants, quotas and purge"
+authors = [{ name = "jhnnsrs", email = "jhnnsrs@gmail.com" }]
+requires-python = ">=3.12,<4"
+readme = "README.md"
+license = "MIT"
+dependencies = [
+    "django>=5.2",
+    "django-polymorphic>=4.11.2",
+    "authentikate>=5.1.0",
+    "kante>=2.4.1",
+    "strawberry-graphql>=0.260",
+    "pydantic>2,<3",
+    "boto3>=1.38.9",
+    "duckdb>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.8",
+    "django-types>=0.24.0",
+    "dokker>=2.8",
+    "psycopg[binary]>=3",
+    "pytest>=8",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=7.1.0",
+    "pytest-django>=4.11.1",
+    "python-semantic-release>=9.21.0",
+    "ruff>=0.15.8",
+    "types-boto3[s3,sts]>=1.38",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "test_project.settings"
+asyncio_mode = "auto"
+
+[tool.basedpyright]
+include = ["arkitekt_datalayer"]
+exclude = ["**/migrations", "**/__pycache__"]
+typeCheckingMode = "standard"
+
+[tool.ruff]
+exclude = [".venv", "tests", "test_project", "test_app", "**/migrations"]
+line-length = 300
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-select = ["ANN", "D1"]
+extend-ignore = ["ANN002", "ANN003", "D100", "D104", "ANN401"]
+
+[tool.hatch.build.targets.sdist]
+include = ["arkitekt_datalayer"]
+
+[tool.hatch.build.targets.wheel]
+include = ["arkitekt_datalayer"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+upload_to_pypi = true
+branch = "main"
+build_command = "uv build"

@@ -1,0 +1,31 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [main] # or any branches you want to target
+  push:
+    branches: [main]
+
+jobs:
+  run_tests:
+    name: Python (Pull Request Tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and set Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          python-version: "3.12"
+
+      - name: Install the project
+        run: uv sync --all-extras --dev
+
+      - name: Check Ruff
+        run: uv run ruff check arkitekt_datalayer
+
+      # No baseline: the package type-checks clean and stays that way.
+      - name: Check types (basedpyright)
+        run: uv run basedpyright
