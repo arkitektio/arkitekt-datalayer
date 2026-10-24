@@ -188,3 +188,25 @@ class RequestParquetAccessInput:
     """
     Docstring for RequestParquetAccessInput
     """
+
+
+@pydantic.input(model=base_models.RequestKulisseUploadInput, all_fields=True)
+class RequestKulisseUploadInput:
+    """Request an upload grant for a kulisse model: one self-contained GLB."""
+
+    file_size: ByteCount | None = None
+
+
+@pydantic.input(model=base_models.FinishKulisseUploadInput, all_fields=True)
+class FinishKulisseUploadInput:
+    """Finish a kulisse upload: the model is read and checked."""
+
+
+@pydantic.input(model=base_models.RequestKulisseAccessInput, all_fields=True)
+class RequestKulisseAccessInput:
+    """Request read credentials for a kulisse model."""
+
+
+@pydantic.input(model=base_models.RequestGeneralKulisseAccessInput, all_fields=True)
+class RequestGeneralKulisseAccessInput:
+    """Request read credentials for the organization's kulisse models."""

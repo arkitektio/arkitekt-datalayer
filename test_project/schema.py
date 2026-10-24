@@ -59,11 +59,16 @@ class Mutation:
     request_konnektion_upload = upload_mutation(resolver=mutations.request_konnektion_upload)
     finish_konnektion_upload = upload_mutation(resolver=mutations.finish_konnektion_upload)
 
+    request_kulisse_upload = upload_mutation(resolver=mutations.request_kulisse_upload)
+    finish_kulisse_upload = upload_mutation(resolver=mutations.finish_kulisse_upload)
+    request_kulisse_access = mutation(resolver=mutations.request_kulisse_access)
+    request_general_kulisse_access = mutation(resolver=mutations.request_general_kulisse_access)
+
 
 schema = strawberry.federation.Schema(
     query=Query,
     mutation=Mutation,
-    types=[types.BigFileStore, types.MediaStore, types.ZarrStore],
+    types=[types.BigFileStore, types.MediaStore, types.ZarrStore, types.KulisseStore],
     config=StrawberryConfig(scalar_map={**scalars.SCALAR_MAP}),
     extensions=[AuthentikateExtension],
 )

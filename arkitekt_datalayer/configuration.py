@@ -17,6 +17,7 @@ service with no block at all still installs the app and gets its tables.
 
 from pydantic import BaseModel, ByteSize, ConfigDict, Field
 
+from arkitekt_datalayer.kulisse import DEFAULT_EXTENSIONS, KulissePolicy
 from arkitekt_datalayer.quota import QuotaConfig
 
 
@@ -31,6 +32,30 @@ class DatalayerBucket(BaseModel):
     # widens or narrows what a client can read.
     subpath: str | None = Field(default=None, description="Optional key prefix within the bucket, so several logical buckets can share one physical bucket.")
     default_max_bytes: ByteSize | None = Field(default=None, description="Per-upload byte budget advertised on this bucket's grants when no quota sets `max_upload_bytes`. Accepts `500GiB`-style strings. Unset: 100 MiB.")
+
+
+class KulissePolicySettings(BaseModel):
+    """The limits a kulisse model (one self-contained GLB) is held to when its store is finished."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    max_size: ByteSize = Field(default=ByteSize(50 * 1024 * 1024), description="Largest model file. Accepts `200MiB`-style strings.")
+    max_json: ByteSize = Field(default=ByteSize(4 * 1024 * 1024), description="Largest JSON chunk.")
+    max_nodes: int = Field(default=10_000, description="Most nodes a model may declare.")
+    max_triangles: int = Field(default=2_000_000, description="Most triangles a model may declare.")
+    max_animations: int = Field(default=64, description="Most animation clips a model may declare.")
+    extensions: list[str] = Field(default_factory=lambda: sorted(DEFAULT_EXTENSIONS), description="glTF extensions a model may require.")
+
+    def policy(self) -> KulissePolicy:
+        """The policy the reader enforces."""
+        return KulissePolicy(
+            max_size=int(self.max_size),
+            max_json=int(self.max_json),
+            max_nodes=self.max_nodes,
+            max_triangles=self.max_triangles,
+            max_animations=self.max_animations,
+            extensions=frozenset(self.extensions),
+        )
 
 
 class DatalayerSettings(BaseModel):
@@ -58,6 +83,8 @@ class DatalayerSettings(BaseModel):
     parquet: DatalayerBucket | None = Field(default=None, description="Bucket for Parquet tables (ParquetStore).")
     fabriks: DatalayerBucket | None = Field(default=None, description="Bucket for fabriks stores: mesh collections stored as a prefix of Parquet files.")
     konnektion: DatalayerBucket | None = Field(default=None, description="Bucket for konnektion stores: network collections stored as a prefix of Parquet files.")
+    kulisse: DatalayerBucket | None = Field(default=None, description="Bucket for kulisse stores: device and scene models, each one self-contained binary glTF.")
+    kulisse_policy: KulissePolicySettings = Field(default_factory=KulissePolicySettings, description="The limits a kulisse model is held to when its upload is finished.")
 
     upload_roles: list[str] = Field(default_factory=lambda: ["admin", "editor", "bot"], description="Organization roles allowed to request upload grants. Holding any one of them is enough.")
     quotas: QuotaConfig = Field(default_factory=QuotaConfig, description="Per-organization, per-user and per-upload byte quotas.")

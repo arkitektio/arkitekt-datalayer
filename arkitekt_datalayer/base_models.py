@@ -30,6 +30,32 @@ class RequestGeneralMediaAccessInput(BaseModel):
     expires_in: int | None = None
 
 
+class RequestKulisseUploadInput(BaseModel):
+    """Request temporary S3 upload credentials for a kulisse model: one self-contained GLB."""
+
+    original_file_name: str
+    file_size: int | None = None
+
+
+class FinishKulisseUploadInput(BaseModel):
+    """Finish a kulisse upload: the model is read and checked, and its store populated."""
+
+    store_id: str
+    valid: bool = True
+
+
+class RequestKulisseAccessInput(BaseModel):
+    """Request temporary S3 read credentials for a kulisse model."""
+
+    store_id: str
+
+
+class RequestGeneralKulisseAccessInput(BaseModel):
+    """Request temporary S3 read credentials for the organization's kulisse models."""
+
+    expires_in: int | None = None
+
+
 class RequestGeneralZarrAccessInput(BaseModel):
     """Request temporary S3 access credentials for media objects in the organization."""
 
@@ -442,6 +468,10 @@ class GeneralMediaAccessGrant(GeneralAccessGrant):
     """Temporary S3 credentials for an existing media object, without a store reference."""
 
 
+class GeneralKulisseAccessGrant(GeneralAccessGrant):
+    """Temporary S3 credentials for the organization's kulisse models, without a store reference."""
+
+
 class GeneralZarrAccessGrant(GeneralAccessGrant):
     """Temporary S3 credentials for an existing media object, without a store reference."""
 
@@ -468,6 +498,10 @@ class BigFileAccessGrant(AccessGrant):
 
 class MediaAccessGrant(AccessGrant):
     """Temporary S3 credentials for an existing media object."""
+
+
+class KulisseAccessGrant(AccessGrant):
+    """Temporary S3 credentials for an existing kulisse model."""
 
 
 class ZarrAccessGrant(AccessGrant):
@@ -514,6 +548,10 @@ class BaseUploadGrant(AccessGrant):
 
 class MediaUploadGrant(BaseUploadGrant):
     """Temporary S3 credentials for a media upload."""
+
+
+class KulisseUploadGrant(BaseUploadGrant):
+    """Temporary S3 credentials for a kulisse model upload: one object, written once, then finished."""
 
 
 class BigFileUploadGrant(BaseUploadGrant):

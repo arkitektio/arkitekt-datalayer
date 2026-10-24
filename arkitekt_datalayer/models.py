@@ -706,3 +706,65 @@ class SparseStore(DatalayerStore):
             if SPARSE_INDEXED_AXIS.get(str(layout.get("encoding"))) == axis:
                 return layout
         return None
+
+
+class KulisseStore(DatalayerStore):
+    """A kulisse model: a device or scene model as one self-contained binary glTF.
+
+    **One file, self-describing**, the single-object sibling of :class:`FabriksStore`. The
+    format (``KULISSE.md`` in the kulisse package) is a GLB 2.0 with everything in its binary
+    chunk and an optional joint table in ``extras.arkitekt``; :meth:`fill_info` reads it with the
+    datalayer's own reader (:mod:`arkitekt_datalayer.kulisse`) and records what it says, so
+    nothing about the model is ever declared by a caller.
+
+    It reads by range: the header, the JSON chunk and the binary chunk's header, a few kilobytes
+    whatever the model's size. Only the reference -- the SHA-256 of the exact bytes, what a blok
+    names as ``for_model`` -- reads every byte, streamed.
+    """
+
+    objects: models.Manager["KulisseStore"]  # type: ignore[assignment]
+
+    bucket_key: ClassVar[str] = "kulisse"
+
+    ref = models.CharField(max_length=71, null=True, blank=True, db_index=True, help_text="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating the model names as `for_model`.")
+    spec_version = models.CharField(max_length=16, null=True, blank=True, help_text="The glTF version the model declares (`asset.version`).")
+    generator = models.CharField(max_length=255, null=True, blank=True, help_text="The tool that wrote the model, as it says (`asset.generator`).")
+    bounds = models.JSONField(null=True, blank=True, help_text="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates, read from its accessor bounds through every node transform. Null when nothing declares a box.")
+    stats = models.JSONField(null=True, blank=True, help_text="What the model contains: `{nodes, triangles, textures, animations}`, counted from its JSON.")
+    nodes = models.JSONField(null=True, blank=True, help_text="The named nodes a blok can address (`for_node`, a joint's `node`), sorted.")
+    joints = models.JSONField(null=True, blank=True, help_text="The joint table of `extras.arkitekt` (name, node, type, axis, limit, mimic), empty for a rigid model.")
+    extensions_used = models.JSONField(null=True, blank=True, help_text="The glTF extensions the model uses.")
+    warnings = models.JSONField(null=True, blank=True, help_text="What the reader noticed but did not refuse: repeated or unconventional node names, extensions viewers ignore.")
+
+    def grant_read_access(self, datalayer: Datalayer) -> base_models.KulisseAccessGrant:
+        """Return temporary credentials for reading this model."""
+        return datalayer.generate_kulisse_access_grant(self)
+
+    def get_access_grant(self, datalayer: Datalayer) -> base_models.KulisseAccessGrant:
+        """Return temporary credentials for reading the object."""
+        return self.grant_read_access(datalayer)
+
+    def fill_info(self, datalayer: Datalayer | None = None) -> None:
+        """Read and check the model, record what it says, and mark the store populated.
+
+        Raises:
+            KulisseRefused: If the object is not a model this server registers -- not a GLB,
+                truncated, not self-contained, a broken joint table, or over the policy.
+            FileNotFoundError: If nothing was uploaded.
+        """
+        layer = datalayer or Datalayer()
+        self.path = self.build_store_path(layer)
+        size = self.measure_bytes(layer)
+        manifest = layer.read_kulisse_model(self, size)
+        self.ref = layer.object_sha256(self.bucket, self.key)
+        self.spec_version = manifest.spec_version
+        self.generator = manifest.generator
+        self.bounds = manifest.bounds
+        self.stats = manifest.stats
+        self.nodes = manifest.nodes
+        self.joints = manifest.joints
+        self.extensions_used = manifest.extensions_used
+        self.warnings = manifest.warnings
+        self.size_bytes = size
+        self.populated = True
+        self.save(update_fields=["path", "ref", "spec_version", "generator", "bounds", "stats", "nodes", "joints", "extensions_used", "warnings", "size_bytes", "populated"])

@@ -16,6 +16,9 @@ ByteCount = NewType("ByteCount", int)
 #: A reference to a store an input names: the store id a finished upload returned.
 MediaLike = NewType("MediaLike", str)
 BigFileLike = NewType("BigFileLike", str)
+#: A reference to a kulisse store: the id its finished upload returned. On the wire a kulisse
+#: model is one self-contained binary glTF (GLB).
+KulisseLike = NewType("KulisseLike", str)
 ArrayLike = NewType("ArrayLike", list)
 
 
@@ -50,6 +53,12 @@ SCALAR_MAP: dict[object, ScalarDefinition] = {
     BigFileLike: strawberry.scalar(
         name="BigFileLike",
         description="A reference to a big file store: the id its finished upload returned.",
+        serialize=_identity,
+        parse_value=_identity,
+    ),
+    KulisseLike: strawberry.scalar(
+        name="KulisseLike",
+        description="A reference to a kulisse store (a device or scene model, one self-contained binary glTF): the id its finished upload returned.",
         serialize=_identity,
         parse_value=_identity,
     ),

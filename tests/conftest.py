@@ -116,7 +116,7 @@ def datalayer(backend_stack: Stack, settings):  # noqa: ANN001, ANN201
     dl_module.GLOBAL_DL = None
     s3 = root_s3(backend_stack.rustfs_port)
     existing = {bucket["Name"] for bucket in s3.list_buckets().get("Buckets", [])}
-    for key in ("media", "bigfile", "zarr", "parquet", "fabriks", "konnektion"):
+    for key in ("media", "bigfile", "zarr", "parquet", "fabriks", "konnektion", "kulisse"):
         bucket = settings.DATALAYER[key]["bucket"]
         if bucket not in existing:
             s3.create_bucket(Bucket=bucket)

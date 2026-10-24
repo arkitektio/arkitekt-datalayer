@@ -12,7 +12,9 @@ from pydantic import AliasChoices, BaseModel, ByteSize, ConfigDict, Field
 from arkitekt_datalayer import base_models, codecs
 from arkitekt_datalayer import fabriks as fabriks_format
 from arkitekt_datalayer import konnektion as konnektion_format
+from arkitekt_datalayer import kulisse as kulisse_format
 from arkitekt_datalayer import quota as quota_module
+from arkitekt_datalayer.configuration import KulissePolicySettings
 
 if TYPE_CHECKING:
     from authentikate.models import User
@@ -101,6 +103,11 @@ class DatalayerConfig(BaseModel):
     parquet: BucketConfig | None = None
     fabriks: BucketConfig | None = None
     konnektion: BucketConfig | None = None
+    kulisse: BucketConfig | None = None
+    kulisse_policy: KulissePolicySettings = Field(
+        default_factory=KulissePolicySettings,
+        validation_alias=AliasChoices("KULISSE_POLICY", "kulisse_policy"),
+    )
 
     session_name: str = Field(
         "datalayer",
@@ -824,6 +831,103 @@ class Datalayer:
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
+        )
+
+    def generate_kulisse_upload_grant(self, organization_id: int, input: base_models.RequestKulisseUploadInput, user: Optional["User"] = None) -> base_models.KulisseUploadGrant:
+        """Create a kulisse store and an upload grant scoped to its one key.
+
+        Nothing about the model is taken from the caller beyond its file name and size: the file
+        states the rest, and :meth:`finish_kulisse_upload` reads it.
+        """
+        from arkitekt_datalayer import models
+
+        conf = self.get_bucket_config("kulisse")
+        declared = input.file_size
+        policy = self.config.kulisse_policy.policy()
+        if declared is not None and declared > policy.max_size:
+            raise kulisse_format.KulisseRefused("too_large", f"the model is {declared} bytes, over the limit of {policy.max_size}")
+
+        budget = min(self._admit_upload("kulisse", organization_id, user, declared), policy.max_size)
+        key = self._new_key()
+        store = models.KulisseStore.objects.create(
+            organization_id=organization_id,
+            creator=user,
+            path=self.build_store_path("kulisse", key),
+            key=key,
+            bucket="kulisse",
+            original_file_name=input.original_file_name,
+            content_type="model/gltf-binary",
+            max_bytes=budget,
+        )
+
+        ttl = self._session_duration()
+        access_key, secret_key, session_token = self._issue_temporary_credentials("kulisse", store.key, "upload", ttl)
+
+        return base_models.KulisseUploadGrant(
+            access_key=access_key,
+            secret_key=secret_key,
+            session_token=session_token,
+            bucket=conf.bucket,
+            region=self.config.region,
+            key=self.build_object_key("kulisse", store.key),
+            path=self.build_store_path("kulisse", store.key),
+            expires_in=ttl,
+            max_bytes=budget,
+            original_file_name=store.original_file_name,
+            upload_file_name=store.get_upload_file_name(),
+            upload_content_type=store.content_type,
+            store=str(store.pk),
+        )
+
+    def finish_kulisse_upload(self, organization_id: int, input: base_models.FinishKulisseUploadInput) -> "models.KulisseStore":
+        """Mark a kulisse upload complete, which is when the model is read and checked.
+
+        Not bookkeeping: ``fill_info`` reads the header and the JSON chunk and refuses a file
+        that is not a model this server registers, so a broken upload fails here rather than in
+        a viewer.
+        """
+        from arkitekt_datalayer import models
+
+        return self._finish_store_upload(models.KulisseStore, organization_id, input.store_id, input.valid)
+
+    def read_kulisse_model(self, store: "models.KulisseStore", size: int) -> kulisse_format.KulisseManifest:
+        """Read and check the model in ``store``, whose object is ``size`` bytes, by range."""
+        return kulisse_format.read_model(
+            lambda start, length: self.read_object_range(store.bucket, store.key, start, length),
+            size,
+            self.config.kulisse_policy.policy(),
+            where=f"kulisse store {store.pk}" if store.pk else "the model",
+        )
+
+    def generate_kulisse_access_grant(self, store: "models.KulisseStore", *, expires_in: int | None = None) -> base_models.KulisseAccessGrant:
+        """Read credentials for one kulisse model."""
+        conf = self.get_bucket_config("kulisse")
+        ttl = self._session_duration(expires_in)
+        access_key, secret_key, session_token = self._issue_temporary_credentials("kulisse", store.key, "read", ttl)
+        return base_models.KulisseAccessGrant(
+            access_key=access_key,
+            secret_key=secret_key,
+            session_token=session_token,
+            region=self.config.region,
+            bucket=conf.bucket,
+            key=self.build_object_key("kulisse", store.key),
+            path=self.build_store_path("kulisse", store.key),
+            expires_in=ttl,
+            store=str(store.pk) if store.pk is not None else None,
+        )
+
+    def generate_general_kulisse_access_grant(self, organization_id: int, user_id: int, expires_in: int | None = None) -> base_models.GeneralKulisseAccessGrant:
+        """Read credentials for the kulisse bucket."""
+        conf = self.get_bucket_config("kulisse")
+        ttl = self._session_duration(expires_in)
+        access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("kulisse", organization_id, user_id, ttl)
+        return base_models.GeneralKulisseAccessGrant(
+            access_key=access_key,
+            secret_key=secret_key,
+            session_token=session_token,
+            region=self.config.region,
+            bucket=conf.bucket,
+            expires_in=ttl,
         )
 
     def generate_bigfile_upload_grant(self, organization_id: int, input: base_models.RequestBigFileUploadInput, user: Optional["User"] = None) -> base_models.BigFileUploadGrant:
@@ -1739,6 +1843,41 @@ class Datalayer:
             raise FileNotFoundError(f"No object at s3://{conf.bucket}/{key}, so there is nothing to read. Finish the upload first.") from exc
         return body.read(max_bytes) if max_bytes is not None else body.read()
 
+    def read_object_range(self, bucket_key: str, object_path: str, start: int, length: int) -> bytes:
+        """``length`` bytes of an object from ``start``, without fetching the rest; fewer when it ends first.
+
+        Raises:
+            FileNotFoundError: If there is no object at the key.
+        """
+        if length <= 0:
+            return b""
+        conf = self.get_bucket_config(bucket_key)
+        key = self.build_object_key(bucket_key, object_path)
+        try:
+            response = self._s3.get_object(Bucket=conf.bucket, Key=key, Range=f"bytes={start}-{start + length - 1}")
+        except Exception as exc:
+            raise FileNotFoundError(f"No object at s3://{conf.bucket}/{key}, so there is nothing to read. Finish the upload first.") from exc
+        return response["Body"].read()
+
+    def object_sha256(self, bucket_key: str, object_path: str) -> str:
+        """``sha256:`` and the hex digest of an object's exact bytes, streamed in constant memory.
+
+        Raises:
+            FileNotFoundError: If there is no object at the key.
+        """
+        import hashlib
+
+        conf = self.get_bucket_config(bucket_key)
+        key = self.build_object_key(bucket_key, object_path)
+        try:
+            body = self._s3.get_object(Bucket=conf.bucket, Key=key)["Body"]
+        except Exception as exc:
+            raise FileNotFoundError(f"No object at s3://{conf.bucket}/{key}, so there is nothing to hash.") from exc
+        digest = hashlib.sha256()
+        for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+            digest.update(chunk)
+        return "sha256:" + digest.hexdigest()
+
     def store_bytes(
         self,
         model_class: type[StoreModel],
@@ -1752,13 +1891,14 @@ class Datalayer:
         """Write ``payload`` with service credentials and return its finished store.
 
         For bytes the server produces itself (a fetched mail, a rendered snapshot) rather than
-        bytes a client uploads through a grant, so there is no grant, no quota check and no
-        unfinished state: the object is written first and the row created populated, with the
-        size it was written with. Only for single-object stores -- a prefix store is a tree a
-        writer lays out, not one payload.
+        bytes a client uploads through a grant, so there is no grant and no quota check. The
+        object is written first and the store finished through its own ``fill_info``, exactly
+        as an upload is, so a kulisse model written this way is read and checked too. A store
+        that refuses its bytes is deleted, bytes and row, and the refusal raised. Only for
+        single-object stores -- a prefix store is a tree a writer lays out, not one payload.
 
         Raises:
-            ValueError: If ``model_class`` is a prefix store.
+            ValueError: If ``model_class`` is a prefix store, or its ``fill_info`` refuses the bytes.
         """
         if model_class.is_prefix:
             raise ValueError(f"{model_class.__name__} is a prefix store, so it cannot be written as one object.")
@@ -1773,9 +1913,12 @@ class Datalayer:
             path=self.build_store_path(bucket_key, key),
             original_file_name=original_file_name[:1000] if original_file_name else None,
             content_type=content_type[:255] if content_type else None,
-            populated=True,
-            size_bytes=len(payload),
         )
+        try:
+            store.fill_info(self)
+        except Exception:
+            store.delete()
+            raise
         return cast(StoreModel, store)
 
     def delete_object(self, bucket_key: str, object_path: str) -> None:

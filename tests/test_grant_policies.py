@@ -113,7 +113,7 @@ def test_the_prefix_buckets_are_derived_from_the_store_classes():
     assert Datalayer.prefix_bucket_keys() == {"zarr", "fabriks", "konnektion"}
 
     subclasses = DatalayerStore.__subclasses__()
-    assert {subclass.bucket_key for subclass in subclasses} == {"bigfile", "media", "zarr", "parquet", "fabriks", "konnektion"}, "every store type declares which bucket it belongs to"
+    assert {subclass.bucket_key for subclass in subclasses} == {"bigfile", "media", "zarr", "parquet", "fabriks", "konnektion", "kulisse"}, "every store type declares which bucket it belongs to"
     assert [subclass.is_prefix for subclass in (BigFileStore, MediaStore, ParquetStore)] == [False, False, False]
     assert FabriksStore.bucket_key == "fabriks" and FabriksStore.is_prefix
     assert KonnektionStore.bucket_key == "konnektion" and KonnektionStore.is_prefix

@@ -597,3 +597,100 @@ class ParquetStore:
         datalayer = get_current_datalayer()
         grant = cast(models.ParquetStore, self).get_access_grant(datalayer=datalayer)
         return ParquetAccessGrant(**grant.model_dump())
+
+
+@kante.pydantic_type(base_models.KulisseAccessGrant, description="Temporary S3 credentials for reading a kulisse model.")
+class KulisseAccessGrant:
+    """Temporary S3 credentials for a kulisse model."""
+
+    status: str
+    access_key: str
+    secret_key: str
+    session_token: str
+    region: str
+    bucket: str
+    key: str
+    path: str
+    expires_in: int
+    store: str | None
+
+
+@kante.pydantic_type(base_models.GeneralKulisseAccessGrant, description="Temporary S3 credentials for reading the organization's kulisse models.")
+class GeneralKulisseAccessGrant:
+    """Temporary S3 credentials for kulisse models."""
+
+    status: str
+    access_key: str
+    secret_key: str
+    session_token: str
+    region: str
+    bucket: str
+    path: str
+    expires_in: int
+    store: str | None
+
+
+@kante.pydantic_type(base_models.KulisseUploadGrant, description="Temporary S3 credentials for uploading a kulisse model: one self-contained GLB, written once, then finished.")
+class KulisseUploadGrant:
+    """Temporary S3 credentials for a kulisse upload."""
+
+    region: str
+    status: str
+    access_key: str
+    secret_key: str
+    session_token: str
+    bucket: str
+    key: str
+    path: str
+    expires_in: int
+    max_bytes: ByteCount
+    original_file_name: str | None
+    upload_file_name: str
+    upload_content_type: str | None
+    store: str
+
+
+@strawberry.type(description="What a kulisse model contains, counted from its JSON.")
+class KulisseStats:
+    """Counts read off a model's JSON chunk."""
+
+    nodes: int
+    triangles: int
+    textures: int
+    animations: int
+
+
+@kante.django_type(models.KulisseStore, description="A kulisse model: a device or scene model stored as one self-contained binary glTF. Everything here is read from the file when its upload is finished, never declared by a caller.")
+class KulisseStore:
+    """A kulisse store: one GLB and what it says about itself."""
+
+    id: strawberry.auto
+    path: str
+    bucket: str
+    key: str
+    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
+    size_bytes: ByteCount | None = strawberry.field(description="How many bytes the model holds, measured when its upload was finished. Null while unfinished")
+    original_file_name: str | None
+    ref: str | None = strawberry.field(description="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating it names as `forModel`")
+    spec_version: str | None = strawberry.field(description="The glTF version the model declares")
+    generator: str | None = strawberry.field(description="The tool that wrote the model, as it says")
+    bounds: JSON | None = strawberry.field(description="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates. Null when nothing declares a box")
+    nodes: list[str] | None = strawberry.field(description="The named nodes a blok can address")
+    joints: JSON | None = strawberry.field(description="The joint table (`extras.arkitekt.joints`): name, node, type, axis, limit, mimic. Empty for a rigid model")
+    extensions_used: list[str] | None = strawberry.field(description="The glTF extensions the model uses")
+    warnings: list[str] | None = strawberry.field(description="What the reader noticed but did not refuse")
+
+    @kante.django_field(description="What the model contains, counted from its JSON.")
+    def stats(self, info: Info) -> KulisseStats | None:
+        """The counts recorded when the upload was finished."""
+        del info
+        recorded = cast(models.KulisseStore, self).stats
+        return KulisseStats(**recorded) if isinstance(recorded, dict) else None
+
+    @kante.django_field(description="Get temporary S3 read credentials for the model.")
+    def access_grant(self, info: Info) -> KulisseAccessGrant:
+        """Return a signed read grant for the model."""
+        del info
+        datalayer = get_current_datalayer()
+        grant = cast(models.KulisseStore, self).get_access_grant(datalayer=datalayer)
+        return KulisseAccessGrant(**grant.model_dump())

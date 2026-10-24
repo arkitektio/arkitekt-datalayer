@@ -59,6 +59,7 @@ DATALAYER = {
     # Two logical buckets in one physical bucket, kept apart by their subpaths.
     "fabriks": {"bucket": "dl-collections", "subpath": "fabriks"},
     "konnektion": {"bucket": "dl-collections", "subpath": "konnektion"},
+    "kulisse": {"bucket": "dl-kulisse"},
     "upload_roles": ["admin", "editor"],
 }
 
