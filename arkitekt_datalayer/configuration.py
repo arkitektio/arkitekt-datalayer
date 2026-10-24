@@ -23,7 +23,7 @@ from arkitekt_datalayer.quota import QuotaConfig
 class DatalayerBucket(BaseModel):
     """A single S3 bucket binding within the datalayer."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     bucket: str = Field(description="S3 bucket name.")
     # Two logical buckets may point at one physical bucket, and the subpath is what keeps their
@@ -36,7 +36,7 @@ class DatalayerBucket(BaseModel):
 class DatalayerSettings(BaseModel):
     """S3 storage connection, buckets, upload roles and quotas."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     access_key: str = Field(description="S3 access key. Secret -- must be set.")
     secret_key: str = Field(description="S3 secret key. Secret -- must be set.")
