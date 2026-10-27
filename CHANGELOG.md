@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v2.0.0 (2026-10-27)
+
+### Features
+
+- Org-scoped keys, uploader-only uploads, abandoned-upload sweep, resumable refresh
+  ([`61b3e87`](https://github.com/arkitektio/arkitekt-datalayer/commit/61b3e8775b15b73bdec6872e3627b665056d7cc6))
+
+### Breaking Changes
+
+- Requires authentikate>=6. Migrations restart at one 0001: every hub database and bucket must be
+  reset. RefreshZarrUploadInput/RefreshSparseUploadInput are replaced by RefreshUploadInput;
+  refresh_zarr_upload_grant/refresh_sparse_upload_grant by refresh_upload_grant; general access
+  grants lose `path`/`store` and gain `prefix`; finish_* and refresh_* take the calling user.
+
+
 ## v1.1.0 (2026-10-24)
 
 ### Features
