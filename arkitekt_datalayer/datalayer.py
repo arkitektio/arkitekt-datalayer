@@ -1,12 +1,16 @@
+import datetime
+import hashlib
 import json
 import logging
 import uuid
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar, cast
 
 import boto3
 from botocore.config import Config
 from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
 from pydantic import AliasChoices, BaseModel, ByteSize, ConfigDict, Field
 
 from arkitekt_datalayer import base_models, codecs
@@ -118,6 +122,17 @@ class DatalayerConfig(BaseModel):
         7,
         validation_alias=AliasChoices("STORE_GRACE_DAYS", "store_grace_days"),
         description="How long an orphaned store is kept before `purge_orphaned_stores` deletes its bytes. Long enough that an accidental delete is noticed and recoverable.",
+    )
+
+    abandoned_upload_grace_seconds: int = Field(
+        3600,
+        validation_alias=AliasChoices("ABANDONED_UPLOAD_GRACE_SECONDS", "abandoned_upload_grace_seconds"),
+        description="How long past its last grant's expiry an unfinished upload may still be finished. After that it is abandoned: finish and refresh refuse it, and `purge_orphaned_stores` deletes it.",
+    )
+    max_upload_seconds: int = Field(
+        86400,
+        validation_alias=AliasChoices("MAX_UPLOAD_SECONDS", "max_upload_seconds"),
+        description="How long one upload may run, refreshes included, counted from its first grant. A refresh never extends an upload past this.",
     )
 
     upload_roles: list[str] = Field(
@@ -249,13 +264,48 @@ class Datalayer:
             raise FileNotFoundError(f"No media object at s3://{bucket_name}/{key}, so there is nothing to read. Finish the upload before registering what it holds.") from exc
         return response["Body"].read()
 
-    def _new_key(self) -> str:
-        """Generate a new opaque storage key.
+    def _new_key(self, organization_id: int) -> str:
+        """Generate a new storage key under its organization's segment.
+
+        ``<organization segment>/<uuid4 hex>``: unguessable within the organization, and every
+        store of one organization shares a prefix -- which is what lets a general read grant be
+        scoped to the caller's organization (:meth:`organization_prefix`) instead of a bucket.
 
         Returns:
-            A random hex key suitable for store creation.
+            A fresh key suitable for store creation.
         """
-        return uuid.uuid4().hex
+        return f"{self.organization_segment(organization_id)}/{uuid.uuid4().hex}"
+
+    def organization_segment(self, organization_id: int) -> str:
+        """The key segment of one organization in this service: ``<session_name>/<digest>``.
+
+        Not the organization's local primary key. Physical buckets are shared between services
+        (one media bucket serves several), and a local id names different tenants in different
+        services -- organization 1 here is not organization 1 next door -- so an id-keyed prefix
+        would let one service's general grant read another tenant's stores. The organization's
+        ``identifier`` (``<issuer>#<org>``) is the same tenant everywhere; its digest makes it a
+        key-safe segment, and the service's ``session_name`` keeps services apart inside a bucket.
+        """
+        from authentikate.models import Organization
+
+        identifier = Organization.objects.values_list("identifier", flat=True).get(id=organization_id)
+        return f"{self.config.session_name}/{hashlib.sha256(identifier.encode()).hexdigest()[:32]}"
+
+    def _upload_deadline(self, started: datetime.datetime | None = None, ttl: int | None = None) -> datetime.datetime:
+        """Until when an upload may be written and finished: its grant's expiry plus the grace.
+
+        Never past ``max_upload_seconds`` after the upload ``started`` (its store's
+        ``created_at``), so refreshing cannot keep an unfinished store -- and its unreserved
+        bytes -- alive forever.
+        """
+        now = timezone.now()
+        deadline = now + datetime.timedelta(seconds=(ttl or self._session_duration()) + self.config.abandoned_upload_grace_seconds)
+        cap = (started or now) + datetime.timedelta(seconds=self.config.max_upload_seconds + self.config.abandoned_upload_grace_seconds)
+        return min(deadline, cap)
+
+    def organization_prefix(self, bucket_key: str, organization_id: int) -> str:
+        """The object prefix every store of one organization lives under, in one logical bucket."""
+        return self.build_object_key(bucket_key, self.organization_segment(organization_id))
 
     def _session_duration(self, expires_in: int | None = None) -> int:
         """Resolve a credential lifetime.
@@ -273,8 +323,8 @@ class Datalayer:
         """The configured quota for ``user`` acting in the organization. See :mod:`arkitekt_datalayer.quota`."""
         from authentikate.models import Organization
 
-        slug = Organization.objects.values_list("slug", flat=True).get(id=organization_id)
-        return quota_module.resolve_quota(self.config.quotas, slug, user.sub if user is not None else None)
+        identifier = Organization.objects.values_list("identifier", flat=True).get(id=organization_id)
+        return quota_module.resolve_quota(self.config.quotas, identifier, user.sub if user is not None else None)
 
     def _admit_upload(self, bucket_key: str, organization_id: int, user: Optional["User"], declared: int | None) -> int:
         """Check a new upload against the quota, and return the byte budget its grant advertises.
@@ -283,6 +333,13 @@ class Datalayer:
         over quota, or the declared size is over the per-upload limit. The budget is the
         declared size if there is one, else the per-upload quota, else the bucket default.
         """
+        from authentikate.models import Organization
+
+        # Serialize grants per organization: the check reads usage and the caller then creates
+        # the store, so two concurrent requests would both see the same usage and both pass.
+        # The caller runs inside `transaction.atomic`, which holds this row lock until the store
+        # exists -- and rolls the store back if the STS call after it fails.
+        list(Organization.objects.select_for_update().filter(id=organization_id).values_list("id", flat=True))
         quota = self.resolve_quota(organization_id, user)
         quota_module.check_upload(quota, organization_id, user, declared)
         if declared:
@@ -338,7 +395,7 @@ class Datalayer:
 
     def parquet_source(self, store: "models.ParquetStore") -> str:
         """The ``s3://`` URL DuckDB reads a parquet store through."""
-        return f"s3://{self.get_bucket_config('parquet').bucket}/{store.key}"
+        return f"s3://{self.get_bucket_config('parquet').bucket}/{self.build_object_key('parquet', store.key)}"
 
     def parquet_codecs_of(self, location: str) -> set[str]:
         """Every compression codec named in a Parquet's footer, read **without the rows**.
@@ -358,7 +415,7 @@ class Datalayer:
         # Bound to a name for the reason `get_parquet_schema` states: the relation's connection
         # must outlive the expression that built it.
         duck = get_current_duck()
-        rows = duck.sql(f"SELECT DISTINCT compression FROM parquet_metadata('{location}');").fetchall()
+        rows = duck.sql("SELECT DISTINCT compression FROM parquet_metadata($location);", params={"location": location}).fetchall()
         return {str(row[0]).upper() for row in rows}
 
     def refuse_unreadable_table(self, store: "models.ParquetStore") -> None:
@@ -404,7 +461,7 @@ class Datalayer:
         # relation is built, taking its duckdb connection with it, and `fetchall` then raises
         # "Connection has already been closed". Measured against 24 live stores.
         duck = get_current_duck()
-        rows = duck.sql(f"DESCRIBE SELECT * FROM read_parquet('{self.parquet_source(store)}');").fetchall()
+        rows = duck.sql("DESCRIBE SELECT * FROM read_parquet($location);", params={"location": self.parquet_source(store)}).fetchall()
         return [base_models.ParquetColumn(name=row[0], type=row[1], nullable=str(row[2]).upper() == "YES") for row in rows]
 
     def get_sparse_metadata(self, store: "models.SparseStore") -> base_models.SparseMetadata:
@@ -577,9 +634,13 @@ class Datalayer:
         """
         _, resources, allow_list = self._object_resources(bucket_key, object_path)
         s3_resources = [f"arn:aws:s3:::{bucket_name}/{resource}" for resource in resources]
+        # `ListMultipartUploadParts` lets an upload resume: a client that kept its upload id lists
+        # the parts that landed under a refreshed grant and sends only the rest. It is an object
+        # action on the same resources, so it needs no condition -- unlike listing the bucket's
+        # multipart uploads, which would need one MinIO might reject for the whole document.
         action_map = {
             "read": ["s3:GetObject"],
-            "upload": ["s3:PutObject", "s3:AbortMultipartUpload"],
+            "upload": ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
             "delete": ["s3:DeleteObject"],
         }
         # A prefix writer needs more than PutObject: it reads back and rewrites objects inside
@@ -592,6 +653,7 @@ class Datalayer:
                 "s3:PutObject",
                 "s3:DeleteObject",
                 "s3:AbortMultipartUpload",
+                "s3:ListMultipartUploadParts",
             ]
 
         statements: list[dict[str, object]] = [
@@ -628,42 +690,42 @@ class Datalayer:
 
         return {"Version": "2012-10-17", "Statement": statements}
 
-    def _build_general_read_policy(self, bucket_name: str, bucket_key: str) -> dict[str, object]:
-        """Build a read-only session policy covering one whole datalayer bucket.
+    def _build_general_read_policy(self, bucket_name: str, bucket_key: str, organization_id: int) -> dict[str, object]:
+        """Build a read-only session policy covering every store of one organization.
 
-        Deliberately weaker than :meth:`_build_policy`: a *general* grant is not asked for one
-        store, so there is no key to scope it to. It is still a real bound -- read-only, one
-        bucket -- where these grants previously carried no policy at all and so inherited the
-        service account's cluster-wide ``readwrite`` for their whole lifetime.
-
-        Per-organization scoping, which the ``requestGeneral*Access`` callers actually want,
-        is not expressible here while stores are keyed by an opaque uuid with no
-        per-organization prefix. That is a change to the key layout, not to this policy.
+        Weaker than :meth:`_build_policy` -- a *general* grant is not asked for one store -- but
+        bounded by the organization: every key starts with its organization's segment
+        (:meth:`organization_segment`), so the policy names that prefix, inside this logical
+        bucket's subpath. Another organization's stores, and another store kind sharing the physical
+        bucket under a different subpath, stay out of reach.
 
         Args:
             bucket_name: Physical S3 bucket name.
             bucket_key: Logical datalayer store type.
+            organization_id: The organization whose stores the grant reads.
 
         Returns:
-            An IAM policy document permitting reads anywhere in the one bucket.
+            An IAM policy document permitting reads under the organization's prefix.
         """
+        prefix = self.organization_prefix(bucket_key, organization_id)
         statements: list[dict[str, object]] = [
             {
                 "Effect": "Allow",
                 "Action": ["s3:GetObject"],
-                "Resource": [f"arn:aws:s3:::{bucket_name}/*"],
+                "Resource": [f"arn:aws:s3:::{bucket_name}/{prefix}/*"],
             }
         ]
 
         # Same reason as in `_build_policy`: a prefix store is a directory, and a reader that
-        # cannot list it cannot discover its chunks. Unconditional here because a general
-        # grant has no one prefix to condition on.
+        # cannot list it cannot discover its chunks. Conditioned on the organization's prefix,
+        # so a listing never names another organization's stores.
         if bucket_key in self.prefix_bucket_keys():
             statements.append(
                 {
                     "Effect": "Allow",
                     "Action": ["s3:ListBucket"],
                     "Resource": [f"arn:aws:s3:::{bucket_name}"],
+                    "Condition": {"StringLike": {"s3:prefix": [f"{prefix}/", f"{prefix}/*"]}},
                 }
             )
 
@@ -770,7 +832,7 @@ class Datalayer:
             return self._unscoped_fallback(f"a `{action}` grant on {bucket_key} store {object_path}", exc)
 
     def _issue_temporary_user_access_credentials(self, bucket_key: str, organization_id: int, user_id: int, expires_in: int) -> tuple[str, str, str]:
-        """Issue temporary read credentials covering a whole datalayer bucket.
+        """Issue temporary read credentials covering every store of one organization in one bucket.
 
         Args:
             bucket_key: Logical datalayer store type.
@@ -786,24 +848,27 @@ class Datalayer:
         """
         conf = self.get_bucket_config(bucket_key)
         duration = self._session_duration(expires_in)
-        policy = self._build_general_read_policy(conf.bucket, bucket_key)
+        policy = self._build_general_read_policy(conf.bucket, bucket_key, organization_id)
 
         try:
             return self._assume_role("read", duration, policy)
         except Exception as exc:  # noqa: BLE001 - every refusal is the fallback's to judge
             return self._unscoped_fallback(f"a general read grant on {bucket_key} for organization {organization_id}", exc)
 
+    @transaction.atomic
     def generate_media_upload_grant(self, organization_id: int, input: base_models.RequestMediaUploadInput, user: Optional["User"] = None) -> base_models.MediaUploadGrant:
         """Create a media store and an upload grant scoped to its one key."""
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("media")
+        self.get_bucket_config("media")  # refuses an unconfigured bucket before a store is made
 
         budget = self._admit_upload("media", organization_id, user, input.file_size)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.MediaStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
+            declared_bytes=input.file_size,
             path=self.build_store_path("media", key),
             key=key,
             bucket="media",
@@ -811,9 +876,12 @@ class Datalayer:
             content_type=input.content_type,
             max_bytes=budget,
         )
+        return self._build_media_upload_grant(store)
 
-        ttl = self._session_duration()
-
+    def _build_media_upload_grant(self, store: "models.MediaStore", ttl: int | None = None) -> base_models.MediaUploadGrant:
+        """Issue an upload grant for a media store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("media")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("media", store.key, "upload", ttl)
         full_key = self.build_object_key("media", store.key)
 
@@ -826,13 +894,14 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("media", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
         )
 
+    @transaction.atomic
     def generate_kulisse_upload_grant(self, organization_id: int, input: base_models.RequestKulisseUploadInput, user: Optional["User"] = None) -> base_models.KulisseUploadGrant:
         """Create a kulisse store and an upload grant scoped to its one key.
 
@@ -841,17 +910,19 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("kulisse")
+        self.get_bucket_config("kulisse")  # refuses an unconfigured bucket before a store is made
         declared = input.file_size
         policy = self.config.kulisse_policy.policy()
         if declared is not None and declared > policy.max_size:
             raise kulisse_format.KulisseRefused("too_large", f"the model is {declared} bytes, over the limit of {policy.max_size}")
 
         budget = min(self._admit_upload("kulisse", organization_id, user, declared), policy.max_size)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.KulisseStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
+            declared_bytes=declared,
             path=self.build_store_path("kulisse", key),
             key=key,
             bucket="kulisse",
@@ -859,8 +930,12 @@ class Datalayer:
             content_type="model/gltf-binary",
             max_bytes=budget,
         )
+        return self._build_kulisse_upload_grant(store)
 
-        ttl = self._session_duration()
+    def _build_kulisse_upload_grant(self, store: "models.KulisseStore", ttl: int | None = None) -> base_models.KulisseUploadGrant:
+        """Issue an upload grant for a kulisse store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("kulisse")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("kulisse", store.key, "upload", ttl)
 
         return base_models.KulisseUploadGrant(
@@ -872,14 +947,14 @@ class Datalayer:
             key=self.build_object_key("kulisse", store.key),
             path=self.build_store_path("kulisse", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
         )
 
-    def finish_kulisse_upload(self, organization_id: int, input: base_models.FinishKulisseUploadInput) -> "models.KulisseStore":
+    def finish_kulisse_upload(self, organization_id: int, input: base_models.FinishKulisseUploadInput, user: Optional["User"] = None) -> "models.KulisseStore":
         """Mark a kulisse upload complete, which is when the model is read and checked.
 
         Not bookkeeping: ``fill_info`` reads the header and the JSON chunk and refuses a file
@@ -888,7 +963,7 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.KulisseStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.KulisseStore, organization_id, input.store_id, input.valid, user)
 
     def read_kulisse_model(self, store: "models.KulisseStore", size: int) -> kulisse_format.KulisseManifest:
         """Read and check the model in ``store``, whose object is ``size`` bytes, by range."""
@@ -927,20 +1002,24 @@ class Datalayer:
             session_token=session_token,
             region=self.config.region,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("kulisse", organization_id),
             expires_in=ttl,
         )
 
+    @transaction.atomic
     def generate_bigfile_upload_grant(self, organization_id: int, input: base_models.RequestBigFileUploadInput, user: Optional["User"] = None) -> base_models.BigFileUploadGrant:
         """Create a big file store and upload grant."""
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("bigfile")
+        self.get_bucket_config("bigfile")  # refuses an unconfigured bucket before a store is made
 
         budget = self._admit_upload("bigfile", organization_id, user, input.file_size)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.BigFileStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
+            declared_bytes=input.file_size,
             path=self.build_store_path("bigfile", key),
             key=key,
             bucket="bigfile",
@@ -948,9 +1027,12 @@ class Datalayer:
             content_type=input.content_type,
             max_bytes=budget,
         )
+        return self._build_bigfile_upload_grant(store)
 
-        ttl = self._session_duration()
-
+    def _build_bigfile_upload_grant(self, store: "models.BigFileStore", ttl: int | None = None) -> base_models.BigFileUploadGrant:
+        """Issue an upload grant for a bigfile store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("bigfile")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("bigfile", store.key, "upload", ttl)
         full_key = self.build_object_key("bigfile", store.key)
 
@@ -963,14 +1045,14 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("bigfile", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
         )
 
-    def _build_sparse_upload_grant(self, store: "models.SparseStore") -> base_models.SparseUploadGrant:
+    def _build_sparse_upload_grant(self, store: "models.SparseStore", ttl: int | None = None) -> base_models.SparseUploadGrant:
         """Issue an upload grant for a sparse store that already exists.
 
         Split out so credentials can be reissued for the same store without minting a second
@@ -979,7 +1061,7 @@ class Datalayer:
         their expiry are new.
         """
         conf = self.get_bucket_config("zarr")
-        ttl = self._session_duration()
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("zarr", store.key, "upload", ttl)
 
         return base_models.SparseUploadGrant(
@@ -996,6 +1078,7 @@ class Datalayer:
             store=str(store.pk),
         )
 
+    @transaction.atomic
     def generate_sparse_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.SparseUploadGrant:
         """Create a sparse store and a prefix upload grant.
 
@@ -1012,10 +1095,11 @@ class Datalayer:
         self.get_bucket_config("zarr")
 
         budget = self._admit_upload("zarr", organization_id, user, None)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.SparseStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
             path=self.build_store_path("zarr", key),
             key=key,
             bucket="zarr",
@@ -1023,25 +1107,7 @@ class Datalayer:
         )
         return self._build_sparse_upload_grant(store)
 
-    def refresh_sparse_upload_grant(self, organization_id: int, store_id: str) -> base_models.SparseUploadGrant:
-        """Reissue upload credentials for a sparse store whose upload is still in flight.
-
-        The same problem :meth:`refresh_zarr_upload_grant` solves, and a sparse matrix meets it
-        sooner: the 16 um Visium HD matrix is 88 M nonzeros across three arrays, and the 2 um
-        one is 128 M. A write that outlives its session token otherwise dies partway through.
-
-        Refuses a store that is already populated: those bytes are referenced, and handing out
-        write credentials for them is an overwrite path, not a resumption. A store finished with
-        ``valid=False`` is not populated and stays refreshable, which is the retry case.
-        """
-        from arkitekt_datalayer import models
-
-        store = models.SparseStore.objects.get(id=store_id, organization_id=organization_id)
-        if store.populated:
-            raise ValueError(f"Sparse store {store_id} is already populated, so its upload is finished and its bytes are referenced. Reissuing write credentials for it would be an overwrite, not a resumption -- upload a new store instead.")
-        return self._build_sparse_upload_grant(store)
-
-    def finish_sparse_upload(self, organization_id: int, input: base_models.FinishSparseUploadInput) -> "models.SparseStore":
+    def finish_sparse_upload(self, organization_id: int, input: base_models.FinishSparseUploadInput, user: Optional["User"] = None) -> "models.SparseStore":
         """Mark a sparse upload complete, which is when its group metadata is read.
 
         Not bookkeeping: ``fill_info`` fetches the group's attributes and each array's, and
@@ -1051,7 +1117,7 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.SparseStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.SparseStore, organization_id, input.store_id, input.valid, user)
 
     def generate_sparse_access_grant(self, store: "models.SparseStore") -> base_models.SparseAccessGrant:
         """Return read credentials covering a sparse store's whole prefix."""
@@ -1071,10 +1137,10 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def generate_general_sparse_access_grant(self, organization_id: int, user_id: int) -> base_models.GeneralSparseAccessGrant:
+    def generate_general_sparse_access_grant(self, organization_id: int, user_id: int, expires_in: int | None = None) -> base_models.GeneralSparseAccessGrant:
         """Return organization-wide read credentials for sparse stores."""
         conf = self.get_bucket_config("zarr")
-        ttl = self._session_duration()
+        ttl = self._session_duration(expires_in)
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("zarr", organization_id, user_id, ttl)
 
         return base_models.GeneralSparseAccessGrant(
@@ -1082,10 +1148,12 @@ class Datalayer:
             secret_key=secret_key,
             session_token=session_token,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("zarr", organization_id),
             region=self.config.region,
             expires_in=ttl,
         )
 
+    @transaction.atomic
     def generate_fabriks_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.FabriksUploadGrant:
         """Create a fabriks store and a prefix upload grant.
 
@@ -1096,20 +1164,25 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("fabriks")
+        self.get_bucket_config("fabriks")  # refuses an unconfigured bucket before a store is made
 
         budget = self._admit_upload("fabriks", organization_id, user, None)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.FabriksStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
             path=self.build_store_path("fabriks", key),
             key=key,
             bucket="fabriks",
             max_bytes=budget,
         )
+        return self._build_fabriks_upload_grant(store)
 
-        ttl = self._session_duration()
+    def _build_fabriks_upload_grant(self, store: "models.FabriksStore", ttl: int | None = None) -> base_models.FabriksUploadGrant:
+        """Issue an upload grant for a fabriks store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("fabriks")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("fabriks", store.key, "upload", ttl)
         full_key = self.build_object_key("fabriks", store.key)
 
@@ -1122,12 +1195,12 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("fabriks", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             upload_file_name=store.get_upload_file_name(),
             store=str(store.pk),
         )
 
-    def finish_fabriks_upload(self, organization_id: int, input: base_models.FinishFabriksUploadInput) -> "models.FabriksStore":
+    def finish_fabriks_upload(self, organization_id: int, input: base_models.FinishFabriksUploadInput, user: Optional["User"] = None) -> "models.FabriksStore":
         """Mark a fabriks upload complete, which is when its manifest is read.
 
         Unlike an object store, this is not bookkeeping: ``fill_info`` fetches ``fabriks.json``
@@ -1136,7 +1209,7 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.FabriksStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.FabriksStore, organization_id, input.store_id, input.valid, user)
 
     def generate_fabriks_access_grant(self, store: "models.FabriksStore") -> base_models.FabriksAccessGrant:
         """Return read credentials covering a fabriks store's whole prefix."""
@@ -1156,10 +1229,10 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def generate_general_fabriks_access_grant(self, organization_id: int, user_id: int) -> base_models.GeneralFabriksAccessGrant:
+    def generate_general_fabriks_access_grant(self, organization_id: int, user_id: int, expires_in: int | None = None) -> base_models.GeneralFabriksAccessGrant:
         """Return organization-wide read credentials for fabriks stores."""
         conf = self.get_bucket_config("fabriks")
-        ttl = self._session_duration()
+        ttl = self._session_duration(expires_in)
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("fabriks", organization_id, user_id, ttl)
 
         return base_models.GeneralFabriksAccessGrant(
@@ -1167,6 +1240,7 @@ class Datalayer:
             secret_key=secret_key,
             session_token=session_token,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("fabriks", organization_id),
             region=self.config.region,
             expires_in=ttl,
         )
@@ -1216,6 +1290,7 @@ class Datalayer:
             files=manifest.files,
         )
 
+    @transaction.atomic
     def generate_konnektion_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.KonnektionUploadGrant:
         """Create a konnektion store and a prefix upload grant.
 
@@ -1226,20 +1301,25 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("konnektion")
+        self.get_bucket_config("konnektion")  # refuses an unconfigured bucket before a store is made
 
         budget = self._admit_upload("konnektion", organization_id, user, None)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.KonnektionStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
             path=self.build_store_path("konnektion", key),
             key=key,
             bucket="konnektion",
             max_bytes=budget,
         )
+        return self._build_konnektion_upload_grant(store)
 
-        ttl = self._session_duration()
+    def _build_konnektion_upload_grant(self, store: "models.KonnektionStore", ttl: int | None = None) -> base_models.KonnektionUploadGrant:
+        """Issue an upload grant for a konnektion store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("konnektion")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("konnektion", store.key, "upload", ttl)
         full_key = self.build_object_key("konnektion", store.key)
 
@@ -1252,12 +1332,12 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("konnektion", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             upload_file_name=store.get_upload_file_name(),
             store=str(store.pk),
         )
 
-    def finish_konnektion_upload(self, organization_id: int, input: base_models.FinishKonnektionUploadInput) -> "models.KonnektionStore":
+    def finish_konnektion_upload(self, organization_id: int, input: base_models.FinishKonnektionUploadInput, user: Optional["User"] = None) -> "models.KonnektionStore":
         """Mark a konnektion upload complete, which is when its manifest is read.
 
         Unlike an object store, this is not bookkeeping: ``fill_info`` fetches
@@ -1267,7 +1347,7 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.KonnektionStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.KonnektionStore, organization_id, input.store_id, input.valid, user)
 
     def generate_konnektion_access_grant(self, store: "models.KonnektionStore") -> base_models.KonnektionAccessGrant:
         """Return read credentials covering a konnektion store's whole prefix."""
@@ -1287,10 +1367,10 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def generate_general_konnektion_access_grant(self, organization_id: int, user_id: int) -> base_models.GeneralKonnektionAccessGrant:
+    def generate_general_konnektion_access_grant(self, organization_id: int, user_id: int, expires_in: int | None = None) -> base_models.GeneralKonnektionAccessGrant:
         """Return organization-wide read credentials for konnektion stores."""
         conf = self.get_bucket_config("konnektion")
-        ttl = self._session_duration()
+        ttl = self._session_duration(expires_in)
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("konnektion", organization_id, user_id, ttl)
 
         return base_models.GeneralKonnektionAccessGrant(
@@ -1298,11 +1378,12 @@ class Datalayer:
             secret_key=secret_key,
             session_token=session_token,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("konnektion", organization_id),
             region=self.config.region,
             expires_in=ttl,
         )
 
-    def _build_zarr_upload_grant(self, store: "models.ZarrStore") -> base_models.ZarrUploadGrant:
+    def _build_zarr_upload_grant(self, store: "models.ZarrStore", ttl: int | None = None) -> base_models.ZarrUploadGrant:
         """Issue an upload grant for a Zarr store that already exists.
 
         Split out from :meth:`generate_zarr_upload_grant` so credentials can be issued a second
@@ -1311,7 +1392,7 @@ class Datalayer:
         credentials and their expiry are new.
         """
         conf = self.get_bucket_config("zarr")
-        ttl = self._session_duration()
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("zarr", store.key, "upload", ttl)
 
         return base_models.ZarrUploadGrant(
@@ -1330,6 +1411,7 @@ class Datalayer:
             store=str(store.pk),
         )
 
+    @transaction.atomic
     def generate_zarr_upload_grant(self, organization_id: int, input: base_models.RequestZarrUploadInput, user: Optional["User"] = None) -> base_models.ZarrUploadGrant:
         """Create a Zarr store and upload grant."""
         from arkitekt_datalayer import models
@@ -1337,10 +1419,11 @@ class Datalayer:
         self.get_bucket_config("zarr")
 
         budget = self._admit_upload("zarr", organization_id, user, None)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.ZarrStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
             path=self.build_store_path("zarr", key),
             key=key,
             bucket="zarr",
@@ -1354,56 +1437,30 @@ class Datalayer:
 
         return self._build_zarr_upload_grant(store)
 
-    def refresh_zarr_upload_grant(self, organization_id: int, store_id: str) -> base_models.ZarrUploadGrant:
-        """Reissue upload credentials for a Zarr store whose upload is still in flight.
-
-        A grant's credentials expire (``session_duration_seconds``, an hour by default) and the
-        clients holding them treat the session token as static -- there is no refresh hook in
-        obstore's ``S3Store``. So a write that outlives its session dies partway through, and
-        the larger the array the likelier that is. This lets a client that is still writing ask
-        for a fresh session against the *same* prefix and carry on.
-
-        Refuses a store that is already populated: those bytes are referenced, and handing out
-        write credentials for them is an overwrite path, not a resumption. A store finished with
-        ``valid=False`` is *not* populated and stays refreshable, which is the retry case.
-
-        Args:
-            organization_id: The organization the caller is acting in.
-            store_id: Primary key of the store to reissue credentials for.
-
-        Returns:
-            A fresh upload grant addressing the same prefix.
-
-        Raises:
-            ZarrStore.DoesNotExist: If no such store belongs to this organization.
-            ValueError: If the store's upload is already finished.
-        """
-        from arkitekt_datalayer import models
-
-        store = models.ZarrStore.objects.get(id=store_id, organization_id=organization_id)
-        if store.populated:
-            raise ValueError(f"Zarr store {store_id} is already populated, so its upload is finished and there is nothing to resume. Request a new upload grant to write a new store.")
-
-        return self._build_zarr_upload_grant(store)
-
+    @transaction.atomic
     def generate_parquet_upload_grant(self, organization_id: int, input: base_models.RequestParquetUploadInput, user: Optional["User"] = None) -> base_models.ParquetUploadGrant:
         """Create a parquet store and upload grant."""
         from arkitekt_datalayer import models
 
-        conf = self.get_bucket_config("parquet")
+        self.get_bucket_config("parquet")  # refuses an unconfigured bucket before a store is made
 
         budget = self._admit_upload("parquet", organization_id, user, None)
-        key = self._new_key()
+        key = self._new_key(organization_id)
         store = models.ParquetStore.objects.create(
             organization_id=organization_id,
             creator=user,
+            upload_expires_at=self._upload_deadline(),
             path=self.build_store_path("parquet", key),
             key=key,
             bucket="parquet",
             max_bytes=budget,
         )
+        return self._build_parquet_upload_grant(store)
 
-        ttl = self._session_duration()
+    def _build_parquet_upload_grant(self, store: "models.ParquetStore", ttl: int | None = None) -> base_models.ParquetUploadGrant:
+        """Issue an upload grant for a parquet store that already exists: on request, and again on refresh."""
+        conf = self.get_bucket_config("parquet")
+        ttl = ttl or self._session_duration()
         access_key, secret_key, session_token = self._issue_temporary_credentials("parquet", store.key, "upload", ttl)
         full_key = self.build_object_key("parquet", store.key)
 
@@ -1416,32 +1473,118 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("parquet", store.key),
             expires_in=ttl,
-            max_bytes=budget,
+            max_bytes=store.max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
         )
 
-    def _finish_store_upload(self, model_class: type[StoreModel], organization_id: int, store_id: str, valid: bool) -> StoreModel:
+    def _upload_grant_builders(self) -> dict[type["models.DatalayerStore"], Callable[..., base_models.BaseModel]]:
+        """The grant builder of every store kind, which is what makes every kind refreshable."""
+        from arkitekt_datalayer import models
+
+        return {
+            models.MediaStore: self._build_media_upload_grant,
+            models.KulisseStore: self._build_kulisse_upload_grant,
+            models.BigFileStore: self._build_bigfile_upload_grant,
+            models.SparseStore: self._build_sparse_upload_grant,
+            models.FabriksStore: self._build_fabriks_upload_grant,
+            models.KonnektionStore: self._build_konnektion_upload_grant,
+            models.ZarrStore: self._build_zarr_upload_grant,
+            models.ParquetStore: self._build_parquet_upload_grant,
+        }
+
+    def refresh_upload_grant(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: Optional["User"] = None) -> base_models.BaseModel:
+        """Reissue upload credentials for an upload that is still in flight, to the same key.
+
+        A grant's credentials expire (``session_duration_seconds``, an hour by default), and a
+        write that outlives them dies partway through -- the larger the store, the likelier.
+        A refresh lets the uploader carry on against the *same* key: a multipart upload lists
+        its parts and continues, a prefix writer keeps writing its tree. Minting a new store
+        instead would leave the first one's bytes behind.
+
+        Bounded three ways: only the uploader may refresh (:meth:`_uploaders_store`), never a
+        finished store (whose bytes may be referenced, so write credentials would be an
+        overwrite), and never past ``max_upload_seconds`` after the upload started -- each
+        refresh pushes the store's deadline forward, so without a cap an unfinished store
+        would never be abandoned.
+
+        Raises:
+            model_class.DoesNotExist: If no such store belongs to this organization.
+            PermissionError: If the caller did not request this upload.
+            ValueError: If the upload is finished, abandoned, or has run out its time.
+        """
+        store = self._uploaders_store(model_class, organization_id, store_id, user)
+        if store.populated:
+            raise ValueError(f"{model_class.__name__} {store_id} is already finished, so there is nothing to resume: its bytes may be referenced and write credentials for them would be an overwrite. Upload a new store instead.")
+
+        remaining = (store.created_at + datetime.timedelta(seconds=self.config.max_upload_seconds) - timezone.now()).total_seconds()
+        if remaining <= 0:
+            raise ValueError(f"{model_class.__name__} {store_id} has run for its whole {self.config.max_upload_seconds} seconds: finish it with the credentials it holds, or upload a new store.")
+        ttl = self._session_duration(int(min(self.config.session_duration_seconds, remaining)))
+        store.upload_expires_at = self._upload_deadline(store.created_at, ttl)
+        store.save(update_fields=["upload_expires_at"])
+        return self._upload_grant_builders()[model_class](store, ttl)
+
+    def _uploaders_store(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: Optional["User"]) -> StoreModel:
+        """The store an upload step acts on, if the caller is the one who requested it.
+
+        Scoped to the organization like every store lookup, and then to the uploader: finish and
+        refresh are steps *of one upload*, and letting another member of the organization take
+        them would let them finish a colleague's upload with their own bytes or reopen it for
+        writing. A store with no creator was made by the server itself, and only a call with no
+        user (the server again) may act on it.
+
+        Raises:
+            model_class.DoesNotExist: If no such store belongs to this organization.
+            PermissionError: If the caller is not the store's uploader.
+            ValueError: If the upload is unfinished and past its deadline (abandoned).
+        """
+        store = model_class.objects.get(id=store_id, organization_id=organization_id)
+        caller_id = user.pk if user is not None else None
+        if store.creator_id != caller_id:
+            raise PermissionError(f"{model_class.__name__} {store_id} is another user's upload: only the user who requested it may finish or continue it.")
+        if not store.populated and store.upload_expires_at is not None and store.upload_expires_at < timezone.now():
+            raise ValueError(f"{model_class.__name__} {store_id} is an abandoned upload: its credentials expired without a refresh and it was not finished in time. Request a new upload.")
+        return cast(StoreModel, store)
+
+    def _finish_store_upload(self, model_class: type[StoreModel], organization_id: int, store_id: str, valid: bool, user: Optional["User"]) -> StoreModel:
         """Finalize a created store after upload completion.
+
+        One way only: a populated store is never unpopulated again. Its bytes may already be
+        referenced, and an unpopulated store is refreshable -- so a ``valid=False`` that could
+        reach a finished store would hand out write credentials for live data. A second
+        ``valid=True`` returns the store as it is rather than reading it again: what was checked
+        stays what is recorded.
 
         Args:
             model_class: Store model type to load.
             store_id: Primary key of the store row.
-            valid: Whether the upload succeeded and should be marked populated.
+            valid: Whether the upload succeeded and should be marked populated. ``False`` ends an
+                unfinished upload: it can no longer be refreshed or finished, and is purged.
+            user: The caller, who must be the user who requested the upload.
 
         Returns:
             The updated store instance.
+
+        Raises:
+            PermissionError: If the caller did not request this upload.
+            ValueError: If ``valid=False`` names a store that is already finished.
         """
-        store = model_class.objects.get(id=store_id, organization_id=organization_id)
+        store = self._uploaders_store(model_class, organization_id, store_id, user)
+        if store.populated:
+            if not valid:
+                raise ValueError(f"{model_class.__name__} {store_id} is already finished: its upload cannot be marked failed after the fact.")
+            return store
         if valid:
             store.fill_info(self)
             self._warn_on_overrun(store)
         else:
-            store.populated = False
-            store.save(update_fields=["populated"])
-        return cast(StoreModel, store)
+            # A failed upload ends now: its reservation is released and the next sweep deletes it.
+            store.upload_expires_at = timezone.now()
+            store.save(update_fields=["upload_expires_at"])
+        return store
 
     def _warn_on_overrun(self, store: "models.DatalayerStore") -> None:
         """Log an upload that delivered more than the ``max_bytes`` its grant advertised.
@@ -1473,7 +1616,7 @@ class Datalayer:
             delivered / store.max_bytes,
         )
 
-    def finish_media_upload(self, organization_id: int, input: base_models.FinishMediaUploadInput) -> "models.MediaStore":
+    def finish_media_upload(self, organization_id: int, input: base_models.FinishMediaUploadInput, user: Optional["User"] = None) -> "models.MediaStore":
         """Mark a media upload as complete.
 
         Args:
@@ -1484,9 +1627,9 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.MediaStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.MediaStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_bigfile_upload(self, organization_id: int, input: base_models.FinishBigFileUploadInput) -> "models.BigFileStore":
+    def finish_bigfile_upload(self, organization_id: int, input: base_models.FinishBigFileUploadInput, user: Optional["User"] = None) -> "models.BigFileStore":
         """Mark a big file upload as complete.
 
         Args:
@@ -1497,9 +1640,9 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.BigFileStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.BigFileStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_zarr_upload(self, organization_id: int, input: base_models.FinishZarrUploadInput) -> "models.ZarrStore":
+    def finish_zarr_upload(self, organization_id: int, input: base_models.FinishZarrUploadInput, user: Optional["User"] = None) -> "models.ZarrStore":
         """Mark a Zarr upload as complete.
 
         Args:
@@ -1510,9 +1653,9 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.ZarrStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.ZarrStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_parquet_upload(self, organization_id: int, input: base_models.FinishParquetUploadInput) -> "models.ParquetStore":
+    def finish_parquet_upload(self, organization_id: int, input: base_models.FinishParquetUploadInput, user: Optional["User"] = None) -> "models.ParquetStore":
         """Mark a parquet upload as complete.
 
         Args:
@@ -1523,7 +1666,7 @@ class Datalayer:
         """
         from arkitekt_datalayer import models
 
-        return self._finish_store_upload(models.ParquetStore, organization_id, input.store_id, input.valid)
+        return self._finish_store_upload(models.ParquetStore, organization_id, input.store_id, input.valid, user)
 
     def get_object_size(self, bucket_key: str, object_key: str) -> int:
         """Get the size of an object in bytes.
@@ -1663,7 +1806,6 @@ class Datalayer:
         """
         conf = self.get_bucket_config("media")
         ttl = self._session_duration(expires_in)
-        # TODO: FIX ORGANIZATION SCOPED MEDIA GRANTS
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("media", organization_id, user_id, ttl)
         return base_models.GeneralMediaAccessGrant(
             access_key=access_key,
@@ -1671,6 +1813,7 @@ class Datalayer:
             session_token=session_token,
             region=self.config.region,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("media", organization_id),
             expires_in=ttl,
         )
 
@@ -1691,7 +1834,6 @@ class Datalayer:
         """
         conf = self.get_bucket_config("parquet")
         ttl = self._session_duration(expires_in)
-        # TODO: FIX ORGANIZATION SCOPED MEDIA GRANTS
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("parquet", organization_id, user_id, ttl)
         return base_models.GeneralParquetAccessGrant(
             access_key=access_key,
@@ -1699,6 +1841,7 @@ class Datalayer:
             session_token=session_token,
             region=self.config.region,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("parquet", organization_id),
             expires_in=ttl,
         )
 
@@ -1719,7 +1862,6 @@ class Datalayer:
         """
         conf = self.get_bucket_config("zarr")
         ttl = self._session_duration(expires_in)
-        # TODO: FIX ORGANIZATION SCOPED MEDIA GRANTS
         access_key, secret_key, session_token = self._issue_temporary_user_access_credentials("zarr", organization_id, user_id, ttl)
         return base_models.GeneralZarrAccessGrant(
             access_key=access_key,
@@ -1727,6 +1869,7 @@ class Datalayer:
             session_token=session_token,
             region=self.config.region,
             bucket=conf.bucket,
+            prefix=self.organization_prefix("zarr", organization_id),
             expires_in=ttl,
         )
 
@@ -1903,7 +2046,7 @@ class Datalayer:
         if model_class.is_prefix:
             raise ValueError(f"{model_class.__name__} is a prefix store, so it cannot be written as one object.")
         bucket_key = model_class.bucket_key
-        key = self._new_key()
+        key = self._new_key(organization_id)
         self.put_file(bucket_key, key, payload, content_type)
         store = model_class.objects.create(
             organization_id=organization_id,
@@ -1998,6 +2141,62 @@ class Datalayer:
         # missed by the listing above, so clear it too. Deleting an absent key is a no-op.
         self.delete_object(bucket_key, object_path)
         return deleted
+
+    def abort_incomplete_uploads(self, bucket_key: str, object_path: str, *, prefix: bool) -> int:
+        """Abort every multipart upload still open at a store's key, and return how many.
+
+        Parts of an unfinished multipart upload are stored and billed, but no listing of the
+        bucket shows them -- so :meth:`delete_prefix` and :meth:`delete_object` cannot see,
+        let alone remove, what an interrupted upload left behind. Purging a store therefore
+        aborts them too. Best effort: an object store that cannot list multipart uploads is
+        logged, not fatal, because the bucket's lifecycle rule (:meth:`ensure_lifecycle`) is the
+        backstop.
+
+        Args:
+            bucket_key: Logical datalayer store type.
+            object_path: Store-relative key or prefix.
+            prefix: Whether the store is a prefix (abort everything under it) or one object.
+        """
+        conf = self.get_bucket_config(bucket_key)
+        full_key = self.build_object_key(bucket_key, object_path)
+        listed = full_key.rstrip("/") + "/" if prefix else full_key
+        aborted = 0
+        try:
+            paginator = self._s3.get_paginator("list_multipart_uploads")
+            for page in paginator.paginate(Bucket=conf.bucket, Prefix=listed):
+                for upload in page.get("Uploads", []):
+                    if not prefix and upload.get("Key") != full_key:
+                        continue
+                    self._s3.abort_multipart_upload(Bucket=conf.bucket, Key=upload["Key"], UploadId=upload["UploadId"])
+                    aborted += 1
+        except Exception:  # noqa: BLE001 - the lifecycle rule is the backstop
+            logger.warning("Could not abort incomplete multipart uploads under %s/%s.", conf.bucket, listed, exc_info=True)
+        return aborted
+
+    #: The id of the lifecycle rule this service owns in each bucket. Other rules -- a bucket
+    #: may be shared with another service -- are kept as they are.
+    LIFECYCLE_RULE_ID = "arkitekt-datalayer-abort-incomplete-multipart"
+
+    def ensure_lifecycle(self, days: int = 1) -> list[str]:
+        """Put an ``AbortIncompleteMultipartUpload`` rule on every configured bucket.
+
+        The backstop for parts nobody aborts: a client killed mid-upload whose store is never
+        purged, or an object store that cannot list multipart uploads. Merged into the bucket's
+        existing rules by id, never replacing them, because a physical bucket can be shared.
+
+        Returns:
+            The physical buckets the rule was put on.
+        """
+        rule = {"ID": self.LIFECYCLE_RULE_ID, "Status": "Enabled", "Filter": {"Prefix": ""}, "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": days}}
+        buckets = sorted({conf.bucket for key in ("media", "bigfile", "zarr", "parquet", "fabriks", "konnektion", "kulisse") if (conf := getattr(self.config, key)) is not None})
+        for bucket in buckets:
+            try:
+                existing = self._s3.get_bucket_lifecycle_configuration(Bucket=bucket).get("Rules", [])
+            except Exception:  # noqa: BLE001 - no configuration yet is an error in S3's dialect
+                existing = []
+            rules = [existing_rule for existing_rule in existing if existing_rule.get("ID") != self.LIFECYCLE_RULE_ID] + [rule]
+            self._s3.put_bucket_lifecycle_configuration(Bucket=bucket, LifecycleConfiguration={"Rules": rules})
+        return buckets
 
 
 def load_config() -> DatalayerConfig:

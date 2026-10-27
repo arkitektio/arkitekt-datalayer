@@ -10,7 +10,7 @@ from typing import cast
 
 from kante.types import Info
 
-from arkitekt_datalayer import inputs, models, types
+from arkitekt_datalayer import base_models, inputs, models, types
 from arkitekt_datalayer.context import caller
 from arkitekt_datalayer.datalayer import get_current_datalayer
 
@@ -26,7 +26,16 @@ def finish_fabriks_upload(info: Info, input: inputs.FinishFabriksUploadInput) ->
     """Mark the FabriksStore populated, reading its manifest to learn what was written."""
     dl = get_current_datalayer()
     input_model = input.to_pydantic()
-    return cast(types.FabriksStore, dl.finish_fabriks_upload(info.context.request.organization.id, input_model))
+    organization_id, user = caller(info)
+    return cast(types.FabriksStore, dl.finish_fabriks_upload(organization_id, input_model, user=user))
+
+
+def refresh_fabriks_upload(info: Info, input: inputs.RefreshUploadInput) -> types.FabriksUploadGrant:
+    """Reissue upload credentials for a fabriks upload still in flight, to the same key."""
+    dl = get_current_datalayer()
+    organization_id, user = caller(info)
+    grant = dl.refresh_upload_grant(models.FabriksStore, organization_id, input.to_pydantic().store_id, user=user)
+    return types.FabriksUploadGrant.from_pydantic(cast("base_models.FabriksUploadGrant", grant))
 
 
 def request_fabriks_access(info: Info, input: inputs.RequestFabriksAccessInput) -> types.FabriksAccessGrant:
@@ -35,14 +44,14 @@ def request_fabriks_access(info: Info, input: inputs.RequestFabriksAccessInput) 
 
     model = input.to_pydantic()
 
-    store = models.FabriksStore.objects.get(id=model.store_id, organization=info.context.request.organization)
+    store = models.FabriksStore.objects.get(id=model.store_id, organization=info.context.request.organization, populated=True, orphaned_at__isnull=True)
     return types.FabriksAccessGrant.from_pydantic(dl.generate_fabriks_access_grant(store))
 
 
 def request_general_fabriks_access(info: Info, input: inputs.RequestGeneralFabriksAccessInput) -> types.GeneralFabriksAccessGrant:
     """Request organization-wide temporary S3 read credentials for fabriks stores."""
     dl = get_current_datalayer()
-    input.to_pydantic()
+    model = input.to_pydantic()
 
     organization_id, user = caller(info)
-    return types.GeneralFabriksAccessGrant.from_pydantic(dl.generate_general_fabriks_access_grant(organization_id, user.pk))
+    return types.GeneralFabriksAccessGrant.from_pydantic(dl.generate_general_fabriks_access_grant(organization_id, user.pk, expires_in=model.expires_in))

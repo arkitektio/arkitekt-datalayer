@@ -62,13 +62,13 @@ class _FakeRelation:
 class _FakeDuck:
     """A DuckDB facade that records what it was asked and answers with canned rows."""
 
-    def __init__(self, rows: list[tuple[str]], captured: list[str]) -> None:
+    def __init__(self, rows: list[tuple[str]], captured: list[tuple[str, dict | None]]) -> None:
         self._rows = rows
         self._captured = captured
 
-    def sql(self, query: str) -> _FakeRelation:
-        """Record the query and return the canned relation."""
-        self._captured.append(query)
+    def sql(self, query: str, params: dict | None = None) -> _FakeRelation:
+        """Record the query and its bound parameters, and return the canned relation."""
+        self._captured.append((query, params))
         return _FakeRelation(self._rows)
 
 
@@ -79,11 +79,11 @@ def layer(settings) -> Datalayer:
     return Datalayer()
 
 
-def _stub_duck(monkeypatch: pytest.MonkeyPatch, rows: list[tuple[str]]) -> list[str]:
-    """Point the codec probe at a fake DuckDB and hand back the queries it sends."""
+def _stub_duck(monkeypatch: pytest.MonkeyPatch, rows: list[tuple[str]]) -> list[tuple[str, dict | None]]:
+    """Point the codec probe at a fake DuckDB and hand back the queries it sends, with their parameters."""
     import arkitekt_datalayer.duck as duck_module
 
-    captured: list[str] = []
+    captured: list[tuple[str, dict | None]] = []
     monkeypatch.setattr(duck_module, "get_current_duck", lambda: _FakeDuck(rows, captured))
     return captured
 
@@ -95,7 +95,8 @@ def test_a_table_is_probed_at_its_own_location(layer: Datalayer, monkeypatch: py
 
     layer.refuse_unreadable_table(store)
 
-    assert captured == ["SELECT DISTINCT compression FROM parquet_metadata('s3://tables/abc.parquet');"]
+    # The location is bound, never formatted into the text: this connection holds the service's S3 keys.
+    assert captured == [("SELECT DISTINCT compression FROM parquet_metadata($location);", {"location": "s3://tables/abc.parquet"})]
 
 
 def test_an_unreadable_table_is_refused(layer: Datalayer, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +112,7 @@ def test_a_collection_is_probed_through_one_part_under_its_prefix(layer: Datalay
 
     layer.refuse_unreadable_collection_parts("s3://meshes/abc123", "catalog/cells.parquet", kind="mesh")
 
-    assert captured == ["SELECT DISTINCT compression FROM parquet_metadata('s3://meshes/abc123/catalog/cells.parquet');"]
+    assert captured == [("SELECT DISTINCT compression FROM parquet_metadata($location);", {"location": "s3://meshes/abc123/catalog/cells.parquet"})]
 
 
 def test_a_collection_whose_parts_hyparquet_cannot_read_is_refused(layer: Datalayer, monkeypatch: pytest.MonkeyPatch) -> None:

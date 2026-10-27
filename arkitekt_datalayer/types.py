@@ -53,9 +53,8 @@ class GeneralMediaAccessGrant:
     session_token: str
     region: str
     bucket: str
-    path: str
+    prefix: str
     expires_in: int
-    store: str | None
 
 
 @kante.pydantic_type(base_models.ZarrAccessGrant, description="Temporary S3 credentials for reading a Zarr store.")
@@ -85,9 +84,8 @@ class GeneralZarrAccessGrant:
     session_token: str
     region: str
     bucket: str
-    path: str
+    prefix: str
     expires_in: int
-    store: str | None
 
 
 @kante.pydantic_type(base_models.GeneralParquetAccessGrant, description="Temporary S3 credentials for reading a parquet object.")
@@ -100,9 +98,8 @@ class GeneralParquetAccessGrant:
     session_token: str
     region: str
     bucket: str
-    path: str
+    prefix: str
     expires_in: int
-    store: str | None
 
 
 @kante.pydantic_type(base_models.ParquetAccessGrant, description="Temporary S3 credentials for reading a parquet object.")
@@ -147,6 +144,7 @@ class GeneralSparseAccessGrant:
     session_token: str
     region: str
     bucket: str
+    prefix: str
     expires_in: int
 
 
@@ -186,10 +184,6 @@ class FabriksAccessGrant:
     store: str | None
 
 
-# Note the field list: `status`/`region`/`bucket`/`expires_in` and nothing else, because that
-# is what `GeneralAccessGrant` actually carries. The zarr and parquet twins declare `path` and
-# `store` here as non-null, neither of which exists on the model, so both resolve to None
-# through a non-null field. Not copied.
 @kante.pydantic_type(base_models.GeneralFabriksAccessGrant, description="Temporary S3 credentials for reading the organization's fabriks stores.")
 class GeneralFabriksAccessGrant:
     """Temporary S3 credentials for the organization's fabriks stores."""
@@ -200,6 +194,7 @@ class GeneralFabriksAccessGrant:
     session_token: str
     region: str
     bucket: str
+    prefix: str
     expires_in: int
 
 
@@ -219,9 +214,6 @@ class KonnektionAccessGrant:
     store: str | None
 
 
-# Same field list as its fabriks twin, and for the same reason: `GeneralAccessGrant` carries
-# `status`/`region`/`bucket`/`expires_in` and nothing else, so declaring `path` or `store`
-# here would resolve None through a non-null field.
 @kante.pydantic_type(base_models.GeneralKonnektionAccessGrant, description="Temporary S3 credentials for reading the organization's konnektion stores.")
 class GeneralKonnektionAccessGrant:
     """Temporary S3 credentials for the organization's konnektion stores."""
@@ -232,6 +224,7 @@ class GeneralKonnektionAccessGrant:
     session_token: str
     region: str
     bucket: str
+    prefix: str
     expires_in: int
 
 
@@ -625,9 +618,8 @@ class GeneralKulisseAccessGrant:
     session_token: str
     region: str
     bucket: str
-    path: str
+    prefix: str
     expires_in: int
-    store: str | None
 
 
 @kante.pydantic_type(base_models.KulisseUploadGrant, description="Temporary S3 credentials for uploading a kulisse model: one self-contained GLB, written once, then finished.")

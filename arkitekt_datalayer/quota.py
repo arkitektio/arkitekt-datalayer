@@ -7,12 +7,14 @@ level is unlimited, except the per-upload one, which falls back to the bucket's
 ``default_max_bytes`` so a grant always advertises *some* budget.
 
 Checked when a grant is issued, never while bytes move: a session policy bounds what a
-credential may write, not how much (see ``DatalayerStore.max_bytes``). Usage is therefore what
-has been *measured* -- ``size_bytes`` of stores still in use -- and a grant is refused when that
-plus the size the client declared would pass a limit. In-flight uploads are not reserved: a zarr
-grant cannot declare a size, and reserving its advertised 500 GiB budget would lock a user out
-after two pyramids. The cost is that an overrun is caught on the next grant rather than
-prevented, which is the most S3 allows anyway.
+credential may write, not how much (see ``DatalayerStore.max_bytes``). Usage is what has been
+*measured* -- ``size_bytes`` of finished stores still in use -- plus what in-flight uploads
+*declared*: a single-object upload states its size (``declared_bytes``), so it is reserved until
+it finishes or is abandoned, and ``finish`` refuses an object larger than that. A prefix upload
+(zarr, a collection) cannot know its size up front and reserves nothing; reserving its advertised
+budget would lock a user out after two pyramids. What bounds it instead is time: an unfinished
+store past its deadline is abandoned and deleted (``purge_orphaned_stores``), so bytes written and
+never finished do not outlive ``max_upload_seconds`` plus the grace.
 """
 
 from dataclasses import dataclass
@@ -47,7 +49,7 @@ class QuotaConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     default: OrganizationQuota = Field(default_factory=OrganizationQuota, description="Limits for every organization without its own entry (its `users` map is ignored).")
-    organizations: dict[str, OrganizationQuota] = Field(default_factory=dict, description="Per-organization quotas, keyed by the token `org` claim -- the lok organization *id* as a string (e.g. `3`), not a readable name.")
+    organizations: dict[str, OrganizationQuota] = Field(default_factory=dict, description="Per-organization quotas, keyed by the organization's identifier, `<issuer>#<org>` (e.g. `https://lok.lab#3`): the issuing lok and the token's `org` claim.")
 
 
 @dataclass(frozen=True)
@@ -67,13 +69,13 @@ def _first(*values: int | None) -> int | None:
     return next((int(value) for value in values if value is not None), None)
 
 
-def resolve_quota(config: QuotaConfig, organization_slug: str, user_sub: str | None) -> Quota:
-    """Resolve the effective limits for ``user_sub`` in ``organization_slug``.
+def resolve_quota(config: QuotaConfig, organization_identifier: str, user_sub: str | None) -> Quota:
+    """Resolve the effective limits for ``user_sub`` in the organization ``organization_identifier``.
 
-    ``organization_slug`` is ``Organization.slug`` -- the token's ``org`` claim, which is the
-    issuer's organization *id* as a string, not a readable name.
+    ``organization_identifier`` is ``Organization.identifier``, ``<issuer>#<org>``: an organization
+    is named by the lok that issued it, because two loks can hand out the same org claim.
     """
-    org = config.organizations.get(organization_slug)
+    org = config.organizations.get(organization_identifier)
     user = org.users.get(user_sub) if org is not None and user_sub is not None else None
     levels = [level for level in (user, org, config.default) if level is not None]
 
@@ -85,11 +87,20 @@ def resolve_quota(config: QuotaConfig, organization_slug: str, user_sub: str | N
 
 
 def _usage(**filters) -> int:
-    """Measured bytes held by the stores matching ``filters`` that are still in use."""
+    """Bytes held by the stores matching ``filters``: measured if finished, declared if in flight.
+
+    An in-flight upload counts only until its deadline. Past it the upload is abandoned and its
+    bytes are on their way out (``purge_orphaned_stores``), and counting them would let one
+    crashed client hold a user's quota hostage until the sweep runs.
+    """
+    from django.utils import timezone
+
     from arkitekt_datalayer import models
 
-    live = models.DatalayerStore.objects.filter(orphaned_at__isnull=True, size_bytes__isnull=False, **filters)
-    return live.aggregate(total=Sum("size_bytes"))["total"] or 0
+    stores = models.DatalayerStore.objects.filter(orphaned_at__isnull=True, **filters)
+    measured = stores.filter(populated=True, size_bytes__isnull=False).aggregate(total=Sum("size_bytes"))["total"] or 0
+    reserved = stores.filter(populated=False, declared_bytes__isnull=False, upload_expires_at__gt=timezone.now()).aggregate(total=Sum("declared_bytes"))["total"] or 0
+    return measured + reserved
 
 
 def organization_usage(organization_id: int) -> int:

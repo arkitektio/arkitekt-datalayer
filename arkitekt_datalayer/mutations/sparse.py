@@ -9,7 +9,7 @@ from typing import cast
 
 from kante.types import Info
 
-from arkitekt_datalayer import inputs, models, types
+from arkitekt_datalayer import base_models, inputs, models, types
 from arkitekt_datalayer.context import caller
 from arkitekt_datalayer.datalayer import get_current_datalayer
 
@@ -30,27 +30,29 @@ def finish_sparse_upload(info: Info, input: inputs.FinishSparseUploadInput) -> t
     """
     dl = get_current_datalayer()
     input_model = input.to_pydantic()
-    return cast(types.SparseStore, dl.finish_sparse_upload(info.context.request.organization.id, input_model))
+    organization_id, user = caller(info)
+    return cast(types.SparseStore, dl.finish_sparse_upload(organization_id, input_model, user=user))
 
 
-def refresh_sparse_upload(info: Info, input: inputs.RefreshSparseUploadInput) -> types.SparseUploadGrant:
-    """Reissue upload credentials for a sparse store whose upload is still in flight."""
+def refresh_sparse_upload(info: Info, input: inputs.RefreshUploadInput) -> types.SparseUploadGrant:
+    """Reissue upload credentials for a sparse upload still in flight, to the same key."""
     dl = get_current_datalayer()
-    input_model = input.to_pydantic()
-    return types.SparseUploadGrant.from_pydantic(dl.refresh_sparse_upload_grant(info.context.request.organization.id, input_model.store_id))
+    organization_id, user = caller(info)
+    grant = dl.refresh_upload_grant(models.SparseStore, organization_id, input.to_pydantic().store_id, user=user)
+    return types.SparseUploadGrant.from_pydantic(cast("base_models.SparseUploadGrant", grant))
 
 
 def request_sparse_access(info: Info, input: inputs.RequestSparseAccessInput) -> types.SparseAccessGrant:
     """Request temporary S3 read credentials for a sparse store."""
     dl = get_current_datalayer()
     model = input.to_pydantic()
-    store = models.SparseStore.objects.get(id=model.store_id, organization=info.context.request.organization)
+    store = models.SparseStore.objects.get(id=model.store_id, organization=info.context.request.organization, populated=True, orphaned_at__isnull=True)
     return types.SparseAccessGrant.from_pydantic(dl.generate_sparse_access_grant(store))
 
 
 def request_general_sparse_access(info: Info, input: inputs.RequestGeneralSparseAccessInput) -> types.GeneralSparseAccessGrant:
     """Request temporary S3 read credentials for sparse stores in the organization."""
     dl = get_current_datalayer()
-    del input
+    model = input.to_pydantic()
     organization_id, user = caller(info)
-    return types.GeneralSparseAccessGrant.from_pydantic(dl.generate_general_sparse_access_grant(organization_id, user.pk))
+    return types.GeneralSparseAccessGrant.from_pydantic(dl.generate_general_sparse_access_grant(organization_id, user.pk, expires_in=model.expires_in))

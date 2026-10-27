@@ -125,10 +125,10 @@ def datalayer(backend_stack: Stack, settings):  # noqa: ANN001, ANN201
     dl_module.GLOBAL_DL = None
 
 
-def _context(token: str, sub: str, org_slug: str, roles: list[str]) -> HttpContext:
+def _context(token: str, sub: str, org_identifier: str, roles: list[str]) -> HttpContext:
     user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
-    org, _ = Organization.objects.get_or_create(slug=org_slug)
+    org, _ = Organization.objects.get_or_create(identifier=org_identifier)
     membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles})
     request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
     request.set_membership(membership)  # type: ignore[arg-type]
@@ -138,19 +138,25 @@ def _context(token: str, sub: str, org_slug: str, roles: list[str]) -> HttpConte
 @pytest.fixture
 def authenticated_context(transactional_db) -> HttpContext:  # noqa: ANN001
     """An editor of ``static_org``: may upload."""
-    return _context("test", "1", "static_org", ["editor"])
+    return _context("test", "1", "static_issuer#static_org", ["editor"])
+
+
+@pytest.fixture
+def colleague_context(transactional_db) -> HttpContext:  # noqa: ANN001
+    """Another editor of ``static_org``: may upload, but not finish someone else's upload."""
+    return _context("colleague", "3", "static_issuer#static_org", ["editor"])
 
 
 @pytest.fixture
 def viewer_context(transactional_db) -> HttpContext:  # noqa: ANN001
     """A viewer of ``static_org``: holds no upload role."""
-    return _context("viewer", "2", "static_org", ["viewer"])
+    return _context("viewer", "2", "static_issuer#static_org", ["viewer"])
 
 
 @pytest.fixture
 def other_org_context(transactional_db) -> HttpContext:  # noqa: ANN001
     """An editor of ``other_org``."""
-    return _context("othertest", "9", "other_org", ["editor"])
+    return _context("othertest", "9", "static_issuer#other_org", ["editor"])
 
 
 @pytest.fixture

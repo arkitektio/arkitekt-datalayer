@@ -32,11 +32,13 @@ class Query:
 class Mutation:
     request_media_upload = upload_mutation(resolver=mutations.request_media_upload)
     finish_media_upload = upload_mutation(resolver=mutations.finish_media_upload)
+    refresh_media_upload = upload_mutation(resolver=mutations.refresh_media_upload)
     request_media_access = mutation(resolver=mutations.request_media_access)
     request_general_media_access = mutation(resolver=mutations.request_general_media_access)
 
     request_bigfile_upload = upload_mutation(resolver=mutations.request_bigfile_upload)
     finish_bigfile_upload = upload_mutation(resolver=mutations.finish_bigfile_upload)
+    refresh_bigfile_upload = upload_mutation(resolver=mutations.refresh_bigfile_upload)
     request_bigfile_access = mutation(resolver=mutations.request_bigfile_access)
 
     request_zarr_upload = upload_mutation(resolver=mutations.request_zarr_upload)
@@ -47,6 +49,7 @@ class Mutation:
 
     request_parquet_upload = upload_mutation(resolver=mutations.request_parquet_upload)
     finish_parquet_upload = upload_mutation(resolver=mutations.finish_parquet_upload)
+    refresh_parquet_upload = upload_mutation(resolver=mutations.refresh_parquet_upload)
     request_parquet_access = mutation(resolver=mutations.request_parquet_access)
 
     request_sparse_upload = upload_mutation(resolver=mutations.request_sparse_upload)
@@ -55,12 +58,15 @@ class Mutation:
 
     request_fabriks_upload = upload_mutation(resolver=mutations.request_fabriks_upload)
     finish_fabriks_upload = upload_mutation(resolver=mutations.finish_fabriks_upload)
+    refresh_fabriks_upload = upload_mutation(resolver=mutations.refresh_fabriks_upload)
 
     request_konnektion_upload = upload_mutation(resolver=mutations.request_konnektion_upload)
     finish_konnektion_upload = upload_mutation(resolver=mutations.finish_konnektion_upload)
+    refresh_konnektion_upload = upload_mutation(resolver=mutations.refresh_konnektion_upload)
 
     request_kulisse_upload = upload_mutation(resolver=mutations.request_kulisse_upload)
     finish_kulisse_upload = upload_mutation(resolver=mutations.finish_kulisse_upload)
+    refresh_kulisse_upload = upload_mutation(resolver=mutations.refresh_kulisse_upload)
     request_kulisse_access = mutation(resolver=mutations.request_kulisse_access)
     request_general_kulisse_access = mutation(resolver=mutations.request_general_kulisse_access)
 

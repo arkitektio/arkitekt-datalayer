@@ -52,9 +52,15 @@ class DuckLayer:
         connection.execute(secret_query)
         return connection
 
-    def sql(self, query: str) -> duckdb.DuckDBPyRelation:
-        """Run a query against the S3-configured connection and return the relation."""
-        return self.connection.sql(query)
+    def sql(self, query: str, params: dict[str, object] | None = None) -> duckdb.DuckDBPyRelation:
+        """Run a query against the S3-configured connection and return the relation.
+
+        Anything that came from outside -- a location, a path a manifest named -- goes in
+        ``params`` and is referenced as ``$name``, never formatted into ``query``: this
+        connection holds the datalayer's own S3 keys, so a quote smuggled into the text is a
+        query run with them.
+        """
+        return self.connection.sql(query, params=params)
 
 
 def get_current_duck() -> DuckLayer:

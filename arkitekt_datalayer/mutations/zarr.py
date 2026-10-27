@@ -2,7 +2,7 @@ from typing import cast
 
 from kante.types import Info
 
-from arkitekt_datalayer import inputs, models, types
+from arkitekt_datalayer import base_models, inputs, models, types
 from arkitekt_datalayer.context import caller
 from arkitekt_datalayer.datalayer import get_current_datalayer
 
@@ -19,14 +19,16 @@ def finish_zarr_upload(info: Info, input: inputs.FinishZarrUploadInput) -> types
     """Mark the ZarrStore as populated after a successful upload."""
     dl = get_current_datalayer()
     input_model = input.to_pydantic()
-    return cast(types.ZarrStore, dl.finish_zarr_upload(info.context.request.organization.id, input_model))
+    organization_id, user = caller(info)
+    return cast(types.ZarrStore, dl.finish_zarr_upload(organization_id, input_model, user=user))
 
 
-def refresh_zarr_upload(info: Info, input: inputs.RefreshZarrUploadInput) -> types.ZarrUploadGrant:
-    """Reissue upload credentials for a Zarr store whose upload is still in flight."""
+def refresh_zarr_upload(info: Info, input: inputs.RefreshUploadInput) -> types.ZarrUploadGrant:
+    """Reissue upload credentials for a zarr upload still in flight, to the same key."""
     dl = get_current_datalayer()
-    input_model = input.to_pydantic()
-    return types.ZarrUploadGrant.from_pydantic(dl.refresh_zarr_upload_grant(info.context.request.organization.id, input_model.store_id))
+    organization_id, user = caller(info)
+    grant = dl.refresh_upload_grant(models.ZarrStore, organization_id, input.to_pydantic().store_id, user=user)
+    return types.ZarrUploadGrant.from_pydantic(cast("base_models.ZarrUploadGrant", grant))
 
 
 def request_zarr_access(info: Info, input: inputs.RequestZarrAccessInput) -> types.ZarrAccessGrant:
@@ -35,7 +37,7 @@ def request_zarr_access(info: Info, input: inputs.RequestZarrAccessInput) -> typ
 
     model = input.to_pydantic()
 
-    store = models.ZarrStore.objects.get(id=model.store_id, organization=info.context.request.organization)
+    store = models.ZarrStore.objects.get(id=model.store_id, organization=info.context.request.organization, populated=True, orphaned_at__isnull=True)
     return types.ZarrAccessGrant.from_pydantic(dl.generate_zarr_access_grant(store))
 
 
@@ -43,7 +45,7 @@ def request_general_zarr_access(info: Info, input: inputs.RequestGeneralZarrAcce
     """Request temporary S3 read credentials for a media file."""
 
     dl = get_current_datalayer()
-    input.to_pydantic()
+    model = input.to_pydantic()
 
     organization_id, user = caller(info)
-    return types.GeneralZarrAccessGrant.from_pydantic(dl.generate_general_zarr_access_grant(organization_id, user.pk))
+    return types.GeneralZarrAccessGrant.from_pydantic(dl.generate_general_zarr_access_grant(organization_id, user.pk, expires_in=model.expires_in))

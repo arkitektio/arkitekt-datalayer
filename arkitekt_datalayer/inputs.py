@@ -10,7 +10,7 @@ class RequestMediaUploadInput:
     Docstring for RequestMediaUploadInput
     """
 
-    file_size: ByteCount | None = None
+    file_size: ByteCount
 
 
 @pydantic.input(model=base_models.FinishMediaUploadInput, all_fields=True)
@@ -40,7 +40,7 @@ class RequestBigFileUploadInput:
     Docstring for RequestMediaUploadInput
     """
 
-    file_size: ByteCount | None = None
+    file_size: ByteCount
 
 
 @pydantic.input(model=base_models.FinishBigFileUploadInput, all_fields=True)
@@ -71,11 +71,9 @@ class FinishZarrUploadInput:
     """
 
 
-@pydantic.input(model=base_models.RefreshZarrUploadInput, all_fields=True)
-class RefreshZarrUploadInput:
-    """
-    Docstring for RefreshZarrUploadInput
-    """
+@pydantic.input(model=base_models.RefreshUploadInput, all_fields=True)
+class RefreshUploadInput:
+    """Reissue upload credentials for a store whose upload is still in flight, to the same key."""
 
 
 @pydantic.input(model=base_models.RequestZarrAccessInput, all_fields=True)
@@ -96,13 +94,6 @@ class RequestGeneralZarrAccessInput:
 class FinishSparseUploadInput:
     """
     Docstring for FinishSparseUploadInput
-    """
-
-
-@pydantic.input(model=base_models.RefreshSparseUploadInput, all_fields=True)
-class RefreshSparseUploadInput:
-    """
-    Docstring for RefreshSparseUploadInput
     """
 
 
@@ -194,7 +185,7 @@ class RequestParquetAccessInput:
 class RequestKulisseUploadInput:
     """Request an upload grant for a kulisse model: one self-contained GLB."""
 
-    file_size: ByteCount | None = None
+    file_size: ByteCount
 
 
 @pydantic.input(model=base_models.FinishKulisseUploadInput, all_fields=True)

@@ -7,7 +7,8 @@ class RequestMediaUploadInput(BaseModel):
     """Request temporary S3 upload credentials for a media object."""
 
     original_file_name: str
-    file_size: int | None = None
+    #: Required: it is reserved against the quota while the upload runs, and the ceiling `finish` holds the object to.
+    file_size: int
     content_type: str | None = None
 
 
@@ -34,7 +35,8 @@ class RequestKulisseUploadInput(BaseModel):
     """Request temporary S3 upload credentials for a kulisse model: one self-contained GLB."""
 
     original_file_name: str
-    file_size: int | None = None
+    #: Required: it is reserved against the quota while the upload runs, and the ceiling `finish` holds the object to.
+    file_size: int
 
 
 class FinishKulisseUploadInput(BaseModel):
@@ -90,7 +92,8 @@ class RequestBigFileUploadInput(BaseModel):
     """Request temporary S3 upload credentials for a big file."""
 
     original_file_name: str
-    file_size: int | None = None
+    #: Required: it is reserved against the quota while the upload runs, and the ceiling `finish` holds the object to.
+    file_size: int
     content_type: str | None = None
 
 
@@ -122,8 +125,8 @@ class FinishZarrUploadInput(BaseModel):
     valid: bool = True
 
 
-class RefreshZarrUploadInput(BaseModel):
-    """Reissue upload credentials for a Zarr store whose upload is still in flight."""
+class RefreshUploadInput(BaseModel):
+    """Reissue upload credentials for a store whose upload is still in flight, to the same key."""
 
     store_id: str
 
@@ -165,16 +168,6 @@ class FinishSparseUploadInput(BaseModel):
 
     store_id: str
     valid: bool = True
-
-
-class RefreshSparseUploadInput(BaseModel):
-    """Reissue upload credentials for a sparse store whose upload is still in flight.
-
-    Present for the same reason `RefreshZarrUploadInput` is: a prefix is written incrementally,
-    and a session token can expire in the middle of a matrix that takes minutes to upload.
-    """
-
-    store_id: str
 
 
 class RequestSparseAccessInput(BaseModel):
@@ -453,7 +446,7 @@ class AccessGrant(BaseModel):
 
 
 class GeneralAccessGrant(BaseModel):
-    """Temporary S3 credentials for an existing media object, without a store reference."""
+    """Temporary S3 credentials reading every store of the caller's organization in one bucket."""
 
     status: str = "granted"
     access_key: str
@@ -461,6 +454,8 @@ class GeneralAccessGrant(BaseModel):
     session_token: str
     region: str
     bucket: str
+    #: The object prefix the grant reads under: every store of the organization, and nothing else.
+    prefix: str
     expires_in: int
 
 

@@ -9,7 +9,7 @@ license = "MIT"
 dependencies = [
     "django>=5.2",
     "django-polymorphic>=4.11.2",
-    "authentikate>=5.1.0",
+    "authentikate>=6.0.0",
     "kante>=2.4.1",
     "strawberry-graphql>=0.260",
     "pydantic>2,<3",

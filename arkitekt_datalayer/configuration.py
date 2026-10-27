@@ -67,7 +67,7 @@ class DatalayerSettings(BaseModel):
     secret_key: str = Field(description="S3 secret key. Secret -- must be set.")
     host: str | None = Field(default=None, description="S3 endpoint host.")
     port: int | None = Field(default=None, description="S3 endpoint port.")
-    protocol: str = Field(default="http", description="S3 endpoint protocol (http or https).")
+    protocol: str = Field(default="https", description="S3 endpoint protocol (http or https). A deployment that reaches its object store over a private network may set `http`; the STS session secrets then cross that network in the clear.")
     region: str = Field(default="us-east-1", description="S3 region name.")
 
     role_arn: str | None = Field(default=None, description="Role assumed to mint scoped credentials. Against an object store without IAM roles (RustFS, MinIO) any ARN-shaped string will do: the session is scoped by its inline policy alone.")

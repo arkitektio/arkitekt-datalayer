@@ -174,10 +174,10 @@ def test_a_prefix_upload_may_read_back_and_delete_inside_its_own_tree(layer: Dat
     read back and nothing to clean up but the one key.
     """
     prefix_upload = _statements(layer._build_policy("arrays", "zarr", "abc123", "upload"))[0]
-    assert prefix_upload["Action"] == ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
+    assert prefix_upload["Action"] == ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
 
     object_upload = _statements(layer._build_policy("tables", "parquet", "abc123", "upload"))[0]
-    assert object_upload["Action"] == ["s3:PutObject", "s3:AbortMultipartUpload"]
+    assert object_upload["Action"] == ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
 
 
 def test_a_fabriks_store_is_granted_its_whole_prefix_and_may_write_inside_it(layer: Datalayer, settings):
@@ -204,10 +204,12 @@ def test_every_store_type_has_an_organization_wide_read_grant(layer: Datalayer, 
     settings.DATALAYER = {**settings.DATALAYER, "fabriks": {"bucket": "meshes"}}
     layer = Datalayer()
     layer._sts = sts
+    layer.organization_segment = lambda organization_id: f"svc/org{organization_id}"
 
-    grant = layer.generate_general_fabriks_access_grant(organization_id="1", user_id="1")
+    grant = layer.generate_general_fabriks_access_grant(organization_id=1, user_id=1)
 
     assert grant.bucket == "meshes", "the grant names the bucket it is for"
+    assert grant.prefix == "svc/org1", "and the organization prefix it reads under"
     assert grant.access_key and grant.secret_key, "and carries usable credentials"
     assert grant.status == "granted"
 
@@ -294,23 +296,37 @@ def test_a_short_lived_grant_is_floored_at_the_sts_minimum(layer: Datalayer, sts
     assert sts.calls[-1]["DurationSeconds"] == MIN_SESSION_DURATION_SECONDS
 
 
-def test_a_general_grant_is_read_only_and_stops_at_one_bucket(layer: Datalayer, sts: _RecordingSts):
-    """It cannot name one store, but it must still be narrower than the service account.
+def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(layer: Datalayer, sts: _RecordingSts):
+    """It cannot name one store, but it can name the organization: every key starts with it.
 
-    These grants carried no `Policy` at all, which against MinIO means the session inherits the
-    caller's policy untouched -- `readwrite`, every bucket. Read-only on the one bucket the
-    grant already names is the floor; per-organization scoping needs the keys to carry the
-    organization, which they do not yet.
+    A general grant once covered `bucket/*` and listed the whole bucket, which read every
+    organization's stores. Keys are `<organization>/<uuid>`, so the policy names that prefix --
+    for objects and for the listing alike.
     """
-    layer._issue_temporary_user_access_credentials("zarr", organization_id="1", user_id="1", expires_in=3600)
+    layer.organization_segment = lambda organization_id: f"svc/org{organization_id}"
+    layer._issue_temporary_user_access_credentials("zarr", organization_id=1, user_id=1, expires_in=3600)
 
     statements = _statements(sts.policy)
     assert statements[0]["Action"] == ["s3:GetObject"]
-    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/*"], "one bucket, not every bucket"
+    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/svc/org1/*"], "the caller's organization, not the bucket"
     assert statements[1]["Action"] == ["s3:ListBucket"], "a zarr reader has to be able to list chunks"
+    assert statements[1]["Condition"]["StringLike"]["s3:prefix"] == ["svc/org1/", "svc/org1/*"], "and lists only its own organization"
 
-    layer._issue_temporary_user_access_credentials("media", organization_id="1", user_id="1", expires_in=3600)
+    layer._issue_temporary_user_access_credentials("media", organization_id=1, user_id=1, expires_in=3600)
     assert len(_statements(sts.policy)) == 1, "an object bucket needs no listing"
+
+
+def test_a_general_grant_stays_inside_its_logical_buckets_subpath(layer: Datalayer, settings, sts: _RecordingSts):
+    """Two logical buckets sharing a physical one: a general grant for one must not read the other."""
+    settings.DATALAYER = {**settings.DATALAYER, "zarr": {"bucket": "arrays", "subpath": "meshes"}}
+    layer = Datalayer()
+    layer._sts = sts
+    layer.organization_segment = lambda organization_id: f"svc/org{organization_id}"
+
+    grant = layer.generate_general_zarr_access_grant(organization_id=7, user_id=1)
+
+    assert grant.prefix == "meshes/svc/org7"
+    assert _statements(sts.policy)[0]["Resource"] == ["arn:aws:s3:::arrays/meshes/svc/org7/*"]
 
 
 def test_every_session_is_named_after_the_service(settings, sts: _RecordingSts):

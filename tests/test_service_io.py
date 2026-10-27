@@ -10,7 +10,7 @@ from arkitekt_datalayer.datalayer import Datalayer, is_configured
 
 @pytest.fixture
 def organization(transactional_db) -> Organization:  # noqa: ANN001
-    return Organization.objects.create(slug="static_org")
+    return Organization.objects.create(identifier="static_issuer#static_org")
 
 
 def test_stored_bytes_come_back_finished_and_measured(datalayer, organization):

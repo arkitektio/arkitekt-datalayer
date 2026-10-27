@@ -31,6 +31,7 @@ one GET of one small object. Checking the geometry against what the manifest cla
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -158,10 +159,23 @@ def _entry_path(raw: Any) -> str:
     richer form.
     """
     if isinstance(raw, str):
-        return raw
+        return _safe_part_path(raw)
     if isinstance(raw, dict) and isinstance(raw.get("path"), str):
-        return str(raw["path"])
+        return _safe_part_path(str(raw["path"]))
     raise ManifestError(f"A file entry in a manifest is a path, or an object carrying one, got {raw!r}.")
+
+
+#: A part path a manifest may name: relative segments of unreserved characters only. It ends up
+#: inside an ``s3://`` URL the server reads with its own keys, so a scheme, a ``..`` that climbs
+#: out of the store's prefix, or a quote is refused here rather than trusted downstream.
+_PART_PATH = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
+
+
+def _safe_part_path(path: str) -> str:
+    """Refuse a part path that is not a plain relative path inside the store's prefix."""
+    if not _PART_PATH.fullmatch(path) or any(segment in (".", "..") for segment in path.split("/")):
+        raise ManifestError(f"A file entry in a manifest is a relative path of letters, digits, `.`, `_` and `-` inside the store, got {path!r}.")
+    return path
 
 
 def _assert_grid(grid: Any) -> dict[str, Any]:

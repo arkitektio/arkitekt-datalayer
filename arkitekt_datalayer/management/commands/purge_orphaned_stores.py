@@ -10,12 +10,23 @@ row before the client has uploaded and long before any data row attaches, so "un
 the normal state of an upload in flight, not a sign of garbage. The flag is what separates
 "nothing wants this any more" from "nothing wants this yet".
 
+**Abandoned uploads are the other thing it collects.** An upload that was never finished and is
+past its deadline (``upload_expires_at``: its last grant's expiry plus a grace, never more than
+``max_upload_seconds`` after it started) cannot be finished any more -- finish and refresh refuse
+it -- so nothing will ever reference it, and its bytes would otherwise stay forever. The deadline
+is what makes this safe where "unreferenced" is not: an upload in flight is never past it.
+
+Each store is purged inside a transaction holding a row lock on it. A data row that attaches the
+store meanwhile takes a key-share lock on the same row, so it waits, and then fails on the
+foreign key instead of silently losing its bytes.
+
 Run it from cron. Nothing is freed until it runs.
 """
 
 import datetime
 
 from django.core.management.base import BaseCommand
+from django.db import models, transaction
 from django.utils import timezone
 
 from arkitekt_datalayer import storage
@@ -44,45 +55,78 @@ class Command(BaseCommand):
         if options["limit"]:
             candidates = candidates[: options["limit"]]
 
+        abandoned = DatalayerStore.objects.filter(populated=False, upload_expires_at__isnull=False, upload_expires_at__lt=timezone.now()).order_by("upload_expires_at")
+        if options["limit"]:
+            abandoned = abandoned[: options["limit"]]
+
         purged = objects_deleted = revived = failed = 0
+
+        for store in abandoned:
+            if dry_run:
+                self.stdout.write(f"would purge abandoned {store.bucket}/{store.key} (deadline {store.upload_expires_at:%Y-%m-%d %H:%M})")
+                purged += 1
+                continue
+            outcome = self._purge(store, reason="abandoned upload")
+            if outcome is None:
+                failed += 1
+            elif outcome < 0:
+                revived += 1
+            else:
+                purged += 1
+                objects_deleted += outcome
 
         # The manager is polymorphic, so each row arrives as its real subclass and `is_prefix`
         # can be read straight off it -- a zarr knows to list-and-batch, everything else does
         # not have to care.
         for store in candidates:
-            referrers = storage.referrers_of(store)
-            if referrers:
-                # Re-attached, or shared with a row that outlived the deleted one. The flag was
-                # only ever a candidate marker; this is the check that makes it safe.
-                described = ", ".join(f"{name} x{count}" for name, count in referrers)
-                self.stdout.write(f"keep    {store.bucket}/{store.key} -- still referenced by {described}")
-                revived += 1
-                if not dry_run:
-                    DatalayerStore.objects.filter(pk=store.pk).update(orphaned_at=None)
-                continue
-
-            kind = "prefix" if store.is_prefix else "object"
             if dry_run:
+                referrers = storage.referrers_of(store)
+                if referrers:
+                    revived += 1
+                    continue
+                kind = "prefix" if store.is_prefix else "object"
                 self.stdout.write(f"would purge {kind} {store.bucket}/{store.key} (orphaned {store.orphaned_at:%Y-%m-%d})")
                 purged += 1
                 continue
-
-            try:
-                # Bytes first, then the row. Bytes gone with the row left behind is retried
-                # harmlessly next run; the row gone with bytes left is a leak nothing points at.
-                count = store.purge_bytes()
-                store_pk, bucket, key = store.pk, store.bucket, store.key
-                DatalayerStore.objects.filter(pk=store_pk).delete()
-            except Exception as error:  # noqa: BLE001 - one bad store must not stop the sweep
-                self.stderr.write(f"FAILED  {store.bucket}/{store.key}: {error}")
+            outcome = self._purge(store, reason="orphaned")
+            if outcome is None:
                 failed += 1
-                continue
-
-            self.stdout.write(f"purged  {kind} {bucket}/{key} ({count} object{'s' if count != 1 else ''})")
-            purged += 1
-            objects_deleted += count
+            elif outcome < 0:
+                DatalayerStore.objects.filter(pk=store.pk).update(orphaned_at=None)
+                revived += 1
+            else:
+                purged += 1
+                objects_deleted += outcome
 
         verb = "would purge" if dry_run else "purged"
         self.stdout.write(self.style.SUCCESS(f"{verb} {purged} store(s), {objects_deleted} object(s); kept {revived} still-referenced; {failed} failed"))
         if not purged and not revived:
-            self.stdout.write(f"nothing orphaned longer than {grace_days} day(s)")
+            self.stdout.write(f"nothing orphaned longer than {grace_days} day(s), and no abandoned uploads")
+
+    def _purge(self, store: DatalayerStore, *, reason: str) -> int | None:
+        """Purge one store under a row lock: the object count, -1 if it is still referenced, None on failure."""
+        try:
+            with transaction.atomic():
+                # Locked on its own class, so the lock covers the subclass row data rows point
+                # at as well as the base row.
+                locked = type(store).objects.select_for_update().filter(pk=store.pk).first()
+                if locked is None:
+                    return 0
+                referrers = storage.referrers_of(locked)
+                if referrers:
+                    # Re-attached, or shared with a row that outlived the deleted one. The flag
+                    # was only ever a candidate marker; this is the check that makes it safe.
+                    described = ", ".join(f"{name} x{count}" for name, count in referrers)
+                    self.stdout.write(f"keep    {locked.bucket}/{locked.key} -- still referenced by {described}")
+                    return -1
+                # Bytes first, then the row. Bytes gone with the row left behind is retried
+                # harmlessly next run; the row gone with bytes left is a leak nothing points at.
+                count = locked.purge_bytes()
+                locked._bytes_purged = True
+                models.Model.delete(locked)
+        except Exception as error:  # noqa: BLE001 - one bad store must not stop the sweep
+            self.stderr.write(f"FAILED  {store.bucket}/{store.key}: {error}")
+            return None
+        kind = "prefix" if store.is_prefix else "object"
+        self.stdout.write(f"purged  {kind} {store.bucket}/{store.key} ({count} object{'s' if count != 1 else ''}) -- {reason}")
+        return count

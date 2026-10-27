@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Now
 from polymorphic.models import PolymorphicModel
 
 from arkitekt_datalayer import base_models, sporadik
@@ -89,11 +90,45 @@ class DatalayerStore(PolymorphicModel):
             "`purge_orphaned_stores` re-checks for referrers before deleting anything, and clears this again if the store was re-attached in the meantime"
         ),
     )
+    # `db_default` for the reason `populated` gives: raw SQL inserts never see a Python default.
+    created_at = models.DateTimeField(auto_now_add=True, db_default=Now(), help_text="When the upload grant that made this store was requested.")
+    upload_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Until when the upload may still be written and finished: the last grant's expiry plus slack. Null for a store the server wrote itself. "
+            "An unfinished store past this is abandoned, and `purge_orphaned_stores` deletes its bytes and its row"
+        ),
+    )
+    declared_bytes = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "The size the client declared when it asked for the grant, if it declared one. Reserved against the quota while the upload is in flight, "
+            "and a ceiling at finish: a store that delivered more is refused and its bytes deleted"
+        ),
+    )
 
     def build_store_path(self, datalayer: Datalayer | None = None) -> str:
         """Return the canonical object-store URI for this store."""
         layer = datalayer or Datalayer()
         return layer.build_store_path(self.bucket, self.key)
+
+    def refuse_unreadable(self) -> None:
+        """Refuse read credentials for a store that is not, or no longer, data.
+
+        An unfinished upload has not been checked, and an orphaned store is data someone
+        deleted: it stays only for the grace period, as a chance to undo, not as something to
+        go on reading.
+
+        Raises:
+            PermissionError: If the store is unfinished or orphaned.
+        """
+        if not self.populated:
+            raise PermissionError(f"{type(self).__name__} {self.pk} is an unfinished upload, so there is nothing to read yet.")
+        if self.orphaned_at is not None:
+            raise PermissionError(f"{type(self).__name__} {self.pk} belongs to deleted data, so it is not readable.")
 
     def grant_read_access(self, datalayer: Datalayer) -> AccessGrant:
         """Return temporary credentials for reading this store."""
@@ -111,6 +146,9 @@ class DatalayerStore(PolymorphicModel):
         safe -- deleting an absent key is a no-op.
         """
         layer = datalayer or Datalayer()
+        # Parts of an interrupted multipart upload are invisible to the listing below, so they
+        # are aborted first or they outlive the store.
+        layer.abort_incomplete_uploads(self.bucket, self.key, prefix=self.is_prefix)
         if self.is_prefix:
             return layer.delete_prefix(self.bucket, self.key)
         layer.delete_object(self.bucket, self.key)
@@ -147,6 +185,25 @@ class DatalayerStore(PolymorphicModel):
             logger.warning("Could not measure the bytes held by %s store %s; leaving size_bytes unset.", self.bucket, self.pk, exc_info=True)
             return None
 
+    def measure_declared(self, datalayer: Datalayer) -> int:
+        """Measure a single-object store strictly, and refuse one over the size it declared.
+
+        The finish path of an object store, where :meth:`measured_size` is the wrong tool: a
+        missing object there is not an accounting hiccup but an upload that never happened,
+        and a store marked ready over it is a store with nothing in it. An object larger than
+        what its grant was asked for is refused and deleted -- the declared size is what the
+        quota admitted, so keeping the rest would be storing bytes the quota never saw.
+
+        Raises:
+            FileNotFoundError: If nothing was uploaded.
+            ValueError: If the object is larger than the declared size.
+        """
+        size = self.measure_bytes(datalayer)
+        if self.declared_bytes is not None and size > self.declared_bytes:
+            self.purge_bytes(datalayer)
+            raise ValueError(f"{type(self).__name__} {self.pk} holds {size} bytes, more than the {self.declared_bytes} its upload declared. The upload was refused and its bytes deleted; ask for a grant with the real size.")
+        return size
+
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
         """Delete the remote objects, then the row.
 
@@ -162,6 +219,7 @@ class DatalayerStore(PolymorphicModel):
         with no record of them.
         """
         self.purge_bytes()
+        self._bytes_purged = True
         return super().delete(*args, **kwargs)
 
     def read_bytes(self, datalayer: Datalayer | None = None, *, max_bytes: int | None = None) -> bytes:
@@ -197,18 +255,23 @@ class BigFileStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.BigFileAccessGrant:
         """Return temporary credentials for reading the object."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
-        """Mark the object as populated and normalize its stored URI."""
-        self.path = self.build_store_path(datalayer)
-        # Measured here rather than beside the finish mutation because `fill_info` is the
-        # one point both entry paths reach: the `finish*Upload` mutations and the core
-        # create mutations, which call this directly. Non-fatal, and it never overwrites a
-        # recorded size with null -- see `measured_size`.
-        measured = self.measured_size(datalayer)
-        if measured is not None:
-            self.size_bytes = measured
+        """Check the object is there and within its declared size, then mark the store populated.
+
+        Measured here rather than beside the finish mutation because `fill_info` is the one
+        point both entry paths reach: the `finish*Upload` mutations and the core create
+        mutations, which call this directly. Strict -- see :meth:`measure_declared`.
+
+        Raises:
+            FileNotFoundError: If nothing was uploaded.
+            ValueError: If the object is larger than its declared size.
+        """
+        layer = datalayer or Datalayer()
+        self.path = self.build_store_path(layer)
+        self.size_bytes = self.measure_declared(layer)
         self.populated = True
         self.save(update_fields=["path", "populated", "size_bytes"])
 
@@ -226,18 +289,23 @@ class MediaStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.MediaAccessGrant:
         """Return temporary credentials for reading the object."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
-        """Mark the object as populated and normalize its stored URI."""
-        self.path = self.build_store_path(datalayer)
-        # Measured here rather than beside the finish mutation because `fill_info` is the
-        # one point both entry paths reach: the `finish*Upload` mutations and the core
-        # create mutations, which call this directly. Non-fatal, and it never overwrites a
-        # recorded size with null -- see `measured_size`.
-        measured = self.measured_size(datalayer)
-        if measured is not None:
-            self.size_bytes = measured
+        """Check the object is there and within its declared size, then mark the store populated.
+
+        Measured here rather than beside the finish mutation because `fill_info` is the one
+        point both entry paths reach: the `finish*Upload` mutations and the core create
+        mutations, which call this directly. Strict -- see :meth:`measure_declared`.
+
+        Raises:
+            FileNotFoundError: If nothing was uploaded.
+            ValueError: If the object is larger than its declared size.
+        """
+        layer = datalayer or Datalayer()
+        self.path = self.build_store_path(layer)
+        self.size_bytes = self.measure_declared(layer)
         self.populated = True
         self.save(update_fields=["path", "populated", "size_bytes"])
 
@@ -282,6 +350,7 @@ class ZarrStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.ZarrAccessGrant:
         """Return temporary credentials for reading the object prefix."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
@@ -356,6 +425,7 @@ class ParquetStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.ParquetAccessGrant:
         """Return temporary credentials for reading the object."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
@@ -448,6 +518,7 @@ class FabriksStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.FabriksAccessGrant:
         """Return temporary credentials for reading the object prefix."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
@@ -536,6 +607,7 @@ class KonnektionStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.KonnektionAccessGrant:
         """Return temporary credentials for reading the object prefix."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def attribute_vocabulary(self) -> list[str]:
@@ -648,6 +720,7 @@ class SparseStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.SparseAccessGrant:
         """Return temporary credentials for reading the object prefix."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
@@ -742,6 +815,7 @@ class KulisseStore(DatalayerStore):
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.KulisseAccessGrant:
         """Return temporary credentials for reading the object."""
+        self.refuse_unreadable()
         return self.grant_read_access(datalayer)
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
@@ -754,7 +828,7 @@ class KulisseStore(DatalayerStore):
         """
         layer = datalayer or Datalayer()
         self.path = self.build_store_path(layer)
-        size = self.measure_bytes(layer)
+        size = self.measure_declared(layer)
         manifest = layer.read_kulisse_model(self, size)
         self.ref = layer.object_sha256(self.bucket, self.key)
         self.spec_version = manifest.spec_version

@@ -210,3 +210,29 @@ def test_a_manifest_missing_grid_or_encoding_is_refused(layer: Datalayer):
 
         with pytest.raises(ValueError, match="must carry a `grid` and an `encoding`"):
             layer.get_fabriks_metadata(_store())
+
+
+#: Paths a manifest may not name. Each ends up in an `s3://` location the server reads with its
+#: own keys, so a quote is SQL, a `..` climbs out of the store and a scheme points elsewhere.
+ESCAPING_PATHS = [
+    "catalog/cells.parquet') UNION ALL SELECT 1 --",
+    "../other-store/catalog/cells.parquet",
+    "catalog/../../other-store/cells.parquet",
+    "s3://another-bucket/cells.parquet",
+    "/etc/passwd",
+    "catalog//cells.parquet",
+    "",
+]
+
+
+@pytest.mark.parametrize("path", ESCAPING_PATHS)
+def test_a_part_path_that_leaves_the_store_is_refused(path: str):
+    with pytest.raises(fabriks_format.ManifestError, match="relative path"):
+        fabriks_format.cells_path_of({"cells": {"path": path}})
+    with pytest.raises(fabriks_format.ManifestError, match="relative path"):
+        fabriks_format.cells_path_of({"cells": path})
+
+
+def test_a_written_part_path_is_accepted():
+    assert fabriks_format.cells_path_of({"cells": {"path": "catalog/cells.parquet", "bytes": 1}}) == "catalog/cells.parquet"
+    assert fabriks_format.cells_path_of({}) == fabriks_format.CELL_CATALOG_PATH

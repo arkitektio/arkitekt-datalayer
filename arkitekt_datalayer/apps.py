@@ -12,3 +12,9 @@ class DatalayerConfig(AppConfig):
     name = "arkitekt_datalayer"
     label = "datalayer"
     verbose_name = "Datalayer"
+
+    def ready(self) -> None:
+        """Purge a deleted store's bytes, whichever way its row went (see :mod:`arkitekt_datalayer.signals`)."""
+        from arkitekt_datalayer import signals
+
+        signals.connect()

@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 from arkitekt_datalayer import models
 from arkitekt_datalayer.kulisse import KulissePolicy, KulisseRefused, read_model
 
-REQUEST = "mutation($name: String!, $size: ByteCount) { requestKulisseUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken bucket key store maxBytes uploadContentType } }"
+REQUEST = "mutation($name: String!, $size: ByteCount!) { requestKulisseUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken bucket key store maxBytes uploadContentType } }"
 FINISH = "mutation($id: String!) { finishKulisseUpload(input: {storeId: $id}) { id ref specVersion generator bounds nodes joints warnings sizeBytes stats { nodes triangles textures animations } } }"
 ACCESS = "mutation($id: String!) { requestKulisseAccess(input: {storeId: $id}) { accessKey secretKey sessionToken bucket key } }"
 
@@ -161,7 +161,7 @@ async def test_a_model_upload_is_read_and_described_when_it_is_finished(aexecute
 
 
 async def test_a_file_that_is_not_a_model_fails_its_finish(aexecute, datalayer, client_s3):
-    grant = (await aexecute(REQUEST, {"name": "notes.txt"})).data["requestKulisseUpload"]
+    grant = (await aexecute(REQUEST, {"name": "notes.txt", "size": 28})).data["requestKulisseUpload"]
     client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=b"definitely not a binary glTF")
 
     result = await aexecute(FINISH, {"id": grant["store"]}, allow_errors=True)
@@ -183,7 +183,7 @@ async def test_a_declared_size_over_the_policy_gets_no_grant(aexecute, datalayer
 
 async def test_another_organization_cannot_read_a_model(aexecute, datalayer, client_s3, other_org_context):
     data = glb(*triangle())
-    grant = (await aexecute(REQUEST, {"name": "stage.glb"})).data["requestKulisseUpload"]
+    grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data["requestKulisseUpload"]
     client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=data)
     await aexecute(FINISH, {"id": grant["store"]})
 
@@ -194,7 +194,7 @@ async def test_another_organization_cannot_read_a_model(aexecute, datalayer, cli
 
 @pytest.fixture
 def organization(transactional_db) -> Organization:  # noqa: ANN001
-    return Organization.objects.create(slug="static_org")
+    return Organization.objects.create(identifier="static_issuer#static_org")
 
 
 def test_a_model_the_server_writes_is_checked_too(datalayer, organization):
