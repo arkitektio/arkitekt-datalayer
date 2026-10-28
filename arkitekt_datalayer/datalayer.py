@@ -136,9 +136,9 @@ class DatalayerConfig(BaseModel):
     )
 
     upload_roles: list[str] = Field(
-        default_factory=lambda: ["admin", "editor", "bot"],
+        default_factory=list,
         validation_alias=AliasChoices("UPLOAD_ROLES", "upload_roles"),
-        description="Organization roles allowed to request upload grants; any one of them is enough.",
+        description="The service's roles allowed to request upload grants; any one of them is enough. Empty: the role the service writes with (its `<service>_editor`).",
     )
     quotas: quota_module.QuotaConfig = Field(
         default_factory=quota_module.QuotaConfig,

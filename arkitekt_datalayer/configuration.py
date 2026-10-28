@@ -86,5 +86,5 @@ class DatalayerSettings(BaseModel):
     kulisse: DatalayerBucket | None = Field(default=None, description="Bucket for kulisse stores: device and scene models, each one self-contained binary glTF.")
     kulisse_policy: KulissePolicySettings = Field(default_factory=KulissePolicySettings, description="The limits a kulisse model is held to when its upload is finished.")
 
-    upload_roles: list[str] = Field(default_factory=lambda: ["admin", "editor", "bot"], description="Organization roles allowed to request upload grants. Holding any one of them is enough.")
+    upload_roles: list[str] = Field(default_factory=list, description="The service's roles allowed to request upload grants; holding any one of them is enough. Empty: the role the service writes with (its `<service>_editor`).")
     quotas: QuotaConfig = Field(default_factory=QuotaConfig, description="Per-organization, per-user and per-upload byte quotas.")
