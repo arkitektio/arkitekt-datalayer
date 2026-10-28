@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v3.0.0 (2026-10-28)
+
+### Features
+
+- Upload_roles default to the service's own editor role
+  ([`835c9e3`](https://github.com/arkitektio/arkitekt-datalayer/commit/835c9e3aedba0107554cf32bed674a7c7a2d1892))
+
+### Breaking Changes
+
+- A service that relied on the generic default has to fall back to its own role when `upload_roles`
+  is empty.
+
+
 ## v2.0.0 (2026-10-27)
 
 ### Features
