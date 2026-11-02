@@ -18,7 +18,7 @@ never finished do not outlive ``max_upload_seconds`` plus the grace.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from django.db.models import Sum
 from pydantic import BaseModel, ByteSize, ConfigDict, Field
@@ -117,7 +117,7 @@ def _gib(value: int) -> str:
     return f"{value / 1024**3:.2f} GiB"
 
 
-def check_upload(quota: Quota, organization_id: int, user: Optional["User"], declared: int | None) -> None:
+def check_upload(quota: Quota, organization_id: int, user: "User | None", declared: int | None) -> None:
     """Refuse an upload that the quota does not admit. Raises :class:`QuotaExceeded`.
 
     ``declared`` is the size the client said it is about to write, if it said one.

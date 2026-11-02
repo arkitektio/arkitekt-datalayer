@@ -4,7 +4,8 @@ import json
 import logging
 import uuid
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
+from collections.abc import Callable
 
 import boto3
 from botocore.config import Config
@@ -319,14 +320,14 @@ class Datalayer:
         requested = expires_in or self.config.session_duration_seconds
         return min(max(requested, MIN_SESSION_DURATION_SECONDS), MAX_SESSION_DURATION_SECONDS)
 
-    def resolve_quota(self, organization_id: int, user: Optional["User"]) -> quota_module.Quota:
+    def resolve_quota(self, organization_id: int, user: "User | None") -> quota_module.Quota:
         """The configured quota for ``user`` acting in the organization. See :mod:`arkitekt_datalayer.quota`."""
         from authentikate.models import Organization
 
         identifier = Organization.objects.values_list("identifier", flat=True).get(id=organization_id)
         return quota_module.resolve_quota(self.config.quotas, identifier, user.sub if user is not None else None)
 
-    def _admit_upload(self, bucket_key: str, organization_id: int, user: Optional["User"], declared: int | None) -> int:
+    def _admit_upload(self, bucket_key: str, organization_id: int, user: "User | None", declared: int | None) -> int:
         """Check a new upload against the quota, and return the byte budget its grant advertises.
 
         Raises :class:`~arkitekt_datalayer.quota.QuotaExceeded` when the organization or the user is
@@ -856,7 +857,7 @@ class Datalayer:
             return self._unscoped_fallback(f"a general read grant on {bucket_key} for organization {organization_id}", exc)
 
     @transaction.atomic
-    def generate_media_upload_grant(self, organization_id: int, input: base_models.RequestMediaUploadInput, user: Optional["User"] = None) -> base_models.MediaUploadGrant:
+    def generate_media_upload_grant(self, organization_id: int, input: base_models.RequestMediaUploadInput, user: "User | None" = None) -> base_models.MediaUploadGrant:
         """Create a media store and an upload grant scoped to its one key."""
         from arkitekt_datalayer import models
 
@@ -902,7 +903,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_kulisse_upload_grant(self, organization_id: int, input: base_models.RequestKulisseUploadInput, user: Optional["User"] = None) -> base_models.KulisseUploadGrant:
+    def generate_kulisse_upload_grant(self, organization_id: int, input: base_models.RequestKulisseUploadInput, user: "User | None" = None) -> base_models.KulisseUploadGrant:
         """Create a kulisse store and an upload grant scoped to its one key.
 
         Nothing about the model is taken from the caller beyond its file name and size: the file
@@ -954,7 +955,7 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def finish_kulisse_upload(self, organization_id: int, input: base_models.FinishKulisseUploadInput, user: Optional["User"] = None) -> "models.KulisseStore":
+    def finish_kulisse_upload(self, organization_id: int, input: base_models.FinishKulisseUploadInput, user: "User | None" = None) -> "models.KulisseStore":
         """Mark a kulisse upload complete, which is when the model is read and checked.
 
         Not bookkeeping: ``fill_info`` reads the header and the JSON chunk and refuses a file
@@ -1007,7 +1008,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_bigfile_upload_grant(self, organization_id: int, input: base_models.RequestBigFileUploadInput, user: Optional["User"] = None) -> base_models.BigFileUploadGrant:
+    def generate_bigfile_upload_grant(self, organization_id: int, input: base_models.RequestBigFileUploadInput, user: "User | None" = None) -> base_models.BigFileUploadGrant:
         """Create a big file store and upload grant."""
         from arkitekt_datalayer import models
 
@@ -1079,7 +1080,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_sparse_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.SparseUploadGrant:
+    def generate_sparse_upload_grant(self, organization_id: int, user: "User | None" = None) -> base_models.SparseUploadGrant:
         """Create a sparse store and a prefix upload grant.
 
         The grant covers the whole prefix and permits read-back and delete inside it, because a
@@ -1107,7 +1108,7 @@ class Datalayer:
         )
         return self._build_sparse_upload_grant(store)
 
-    def finish_sparse_upload(self, organization_id: int, input: base_models.FinishSparseUploadInput, user: Optional["User"] = None) -> "models.SparseStore":
+    def finish_sparse_upload(self, organization_id: int, input: base_models.FinishSparseUploadInput, user: "User | None" = None) -> "models.SparseStore":
         """Mark a sparse upload complete, which is when its group metadata is read.
 
         Not bookkeeping: ``fill_info`` fetches the group's attributes and each array's, and
@@ -1154,7 +1155,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_fabriks_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.FabriksUploadGrant:
+    def generate_fabriks_upload_grant(self, organization_id: int, user: "User | None" = None) -> base_models.FabriksUploadGrant:
         """Create a fabriks store and a prefix upload grant.
 
         The grant covers the whole prefix and permits read-back and delete inside it, because
@@ -1200,7 +1201,7 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def finish_fabriks_upload(self, organization_id: int, input: base_models.FinishFabriksUploadInput, user: Optional["User"] = None) -> "models.FabriksStore":
+    def finish_fabriks_upload(self, organization_id: int, input: base_models.FinishFabriksUploadInput, user: "User | None" = None) -> "models.FabriksStore":
         """Mark a fabriks upload complete, which is when its manifest is read.
 
         Unlike an object store, this is not bookkeeping: ``fill_info`` fetches ``fabriks.json``
@@ -1291,7 +1292,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_konnektion_upload_grant(self, organization_id: int, user: Optional["User"] = None) -> base_models.KonnektionUploadGrant:
+    def generate_konnektion_upload_grant(self, organization_id: int, user: "User | None" = None) -> base_models.KonnektionUploadGrant:
         """Create a konnektion store and a prefix upload grant.
 
         The grant covers the whole prefix and permits read-back and delete inside it, because a
@@ -1337,7 +1338,7 @@ class Datalayer:
             store=str(store.pk),
         )
 
-    def finish_konnektion_upload(self, organization_id: int, input: base_models.FinishKonnektionUploadInput, user: Optional["User"] = None) -> "models.KonnektionStore":
+    def finish_konnektion_upload(self, organization_id: int, input: base_models.FinishKonnektionUploadInput, user: "User | None" = None) -> "models.KonnektionStore":
         """Mark a konnektion upload complete, which is when its manifest is read.
 
         Unlike an object store, this is not bookkeeping: ``fill_info`` fetches
@@ -1412,7 +1413,7 @@ class Datalayer:
         )
 
     @transaction.atomic
-    def generate_zarr_upload_grant(self, organization_id: int, input: base_models.RequestZarrUploadInput, user: Optional["User"] = None) -> base_models.ZarrUploadGrant:
+    def generate_zarr_upload_grant(self, organization_id: int, input: base_models.RequestZarrUploadInput, user: "User | None" = None) -> base_models.ZarrUploadGrant:
         """Create a Zarr store and upload grant."""
         from arkitekt_datalayer import models
 
@@ -1438,7 +1439,7 @@ class Datalayer:
         return self._build_zarr_upload_grant(store)
 
     @transaction.atomic
-    def generate_parquet_upload_grant(self, organization_id: int, input: base_models.RequestParquetUploadInput, user: Optional["User"] = None) -> base_models.ParquetUploadGrant:
+    def generate_parquet_upload_grant(self, organization_id: int, input: base_models.RequestParquetUploadInput, user: "User | None" = None) -> base_models.ParquetUploadGrant:
         """Create a parquet store and upload grant."""
         from arkitekt_datalayer import models
 
@@ -1495,7 +1496,7 @@ class Datalayer:
             models.ParquetStore: self._build_parquet_upload_grant,
         }
 
-    def refresh_upload_grant(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: Optional["User"] = None) -> base_models.BaseModel:
+    def refresh_upload_grant(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: "User | None" = None) -> base_models.BaseModel:
         """Reissue upload credentials for an upload that is still in flight, to the same key.
 
         A grant's credentials expire (``session_duration_seconds``, an hour by default), and a
@@ -1527,7 +1528,7 @@ class Datalayer:
         store.save(update_fields=["upload_expires_at"])
         return self._upload_grant_builders()[model_class](store, ttl)
 
-    def _uploaders_store(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: Optional["User"]) -> StoreModel:
+    def _uploaders_store(self, model_class: type[StoreModel], organization_id: int, store_id: str, user: "User | None") -> StoreModel:
         """The store an upload step acts on, if the caller is the one who requested it.
 
         Scoped to the organization like every store lookup, and then to the uploader: finish and
@@ -1549,7 +1550,7 @@ class Datalayer:
             raise ValueError(f"{model_class.__name__} {store_id} is an abandoned upload: its credentials expired without a refresh and it was not finished in time. Request a new upload.")
         return cast(StoreModel, store)
 
-    def _finish_store_upload(self, model_class: type[StoreModel], organization_id: int, store_id: str, valid: bool, user: Optional["User"]) -> StoreModel:
+    def _finish_store_upload(self, model_class: type[StoreModel], organization_id: int, store_id: str, valid: bool, user: "User | None") -> StoreModel:
         """Finalize a created store after upload completion.
 
         One way only: a populated store is never unpopulated again. Its bytes may already be
@@ -1616,7 +1617,7 @@ class Datalayer:
             delivered / store.max_bytes,
         )
 
-    def finish_media_upload(self, organization_id: int, input: base_models.FinishMediaUploadInput, user: Optional["User"] = None) -> "models.MediaStore":
+    def finish_media_upload(self, organization_id: int, input: base_models.FinishMediaUploadInput, user: "User | None" = None) -> "models.MediaStore":
         """Mark a media upload as complete.
 
         Args:
@@ -1629,7 +1630,7 @@ class Datalayer:
 
         return self._finish_store_upload(models.MediaStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_bigfile_upload(self, organization_id: int, input: base_models.FinishBigFileUploadInput, user: Optional["User"] = None) -> "models.BigFileStore":
+    def finish_bigfile_upload(self, organization_id: int, input: base_models.FinishBigFileUploadInput, user: "User | None" = None) -> "models.BigFileStore":
         """Mark a big file upload as complete.
 
         Args:
@@ -1642,7 +1643,7 @@ class Datalayer:
 
         return self._finish_store_upload(models.BigFileStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_zarr_upload(self, organization_id: int, input: base_models.FinishZarrUploadInput, user: Optional["User"] = None) -> "models.ZarrStore":
+    def finish_zarr_upload(self, organization_id: int, input: base_models.FinishZarrUploadInput, user: "User | None" = None) -> "models.ZarrStore":
         """Mark a Zarr upload as complete.
 
         Args:
@@ -1655,7 +1656,7 @@ class Datalayer:
 
         return self._finish_store_upload(models.ZarrStore, organization_id, input.store_id, input.valid, user)
 
-    def finish_parquet_upload(self, organization_id: int, input: base_models.FinishParquetUploadInput, user: Optional["User"] = None) -> "models.ParquetStore":
+    def finish_parquet_upload(self, organization_id: int, input: base_models.FinishParquetUploadInput, user: "User | None" = None) -> "models.ParquetStore":
         """Mark a parquet upload as complete.
 
         Args:
