@@ -23,7 +23,7 @@ from arkitekt_datalayer.configuration import KulissePolicySettings
 
 if TYPE_CHECKING:
     from authentikate.models import User
-    from types_boto3_s3.type_defs import DeleteTypeDef, ObjectIdentifierTypeDef
+    from types_boto3_s3.type_defs import DeleteTypeDef, LifecycleRuleTypeDef, LifecycleRuleUnionTypeDef, ObjectIdentifierTypeDef
     from types_boto3_sts.type_defs import AssumeRoleRequestTypeDef
 
     from arkitekt_datalayer import models
@@ -895,7 +895,7 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("media", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
@@ -948,7 +948,7 @@ class Datalayer:
             key=self.build_object_key("kulisse", store.key),
             path=self.build_store_path("kulisse", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
@@ -1046,7 +1046,7 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("bigfile", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
@@ -1196,7 +1196,7 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("fabriks", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             upload_file_name=store.get_upload_file_name(),
             store=str(store.pk),
         )
@@ -1333,7 +1333,7 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("konnektion", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             upload_file_name=store.get_upload_file_name(),
             store=str(store.pk),
         )
@@ -1474,7 +1474,7 @@ class Datalayer:
             key=full_key,
             path=self.build_store_path("parquet", store.key),
             expires_in=ttl,
-            max_bytes=store.max_bytes,
+            max_bytes=store.max_bytes if store.max_bytes is not None else conf.default_max_bytes,
             original_file_name=store.original_file_name,
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
@@ -1544,7 +1544,7 @@ class Datalayer:
         """
         store = model_class.objects.get(id=store_id, organization_id=organization_id)
         caller_id = user.pk if user is not None else None
-        if store.creator_id != caller_id:
+        if store.creator_id != caller_id:  # pyright: ignore[reportAttributeAccessIssue] - Django adds `<fk>_id` to the model
             raise PermissionError(f"{model_class.__name__} {store_id} is another user's upload: only the user who requested it may finish or continue it.")
         if not store.populated and store.upload_expires_at is not None and store.upload_expires_at < timezone.now():
             raise ValueError(f"{model_class.__name__} {store_id} is an abandoned upload: its credentials expired without a refresh and it was not finished in time. Request a new upload.")
@@ -2166,9 +2166,12 @@ class Datalayer:
             paginator = self._s3.get_paginator("list_multipart_uploads")
             for page in paginator.paginate(Bucket=conf.bucket, Prefix=listed):
                 for upload in page.get("Uploads", []):
-                    if not prefix and upload.get("Key") != full_key:
+                    key, upload_id = upload.get("Key"), upload.get("UploadId")
+                    if key is None or upload_id is None:
                         continue
-                    self._s3.abort_multipart_upload(Bucket=conf.bucket, Key=upload["Key"], UploadId=upload["UploadId"])
+                    if not prefix and key != full_key:
+                        continue
+                    self._s3.abort_multipart_upload(Bucket=conf.bucket, Key=key, UploadId=upload_id)
                     aborted += 1
         except Exception:
             logger.warning("Could not abort incomplete multipart uploads under %s/%s.", conf.bucket, listed, exc_info=True)
@@ -2188,14 +2191,15 @@ class Datalayer:
         Returns:
             The physical buckets the rule was put on.
         """
-        rule = {"ID": self.LIFECYCLE_RULE_ID, "Status": "Enabled", "Filter": {"Prefix": ""}, "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": days}}
+        rule: LifecycleRuleTypeDef = {"ID": self.LIFECYCLE_RULE_ID, "Status": "Enabled", "Filter": {"Prefix": ""}, "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": days}}
         buckets = sorted({conf.bucket for key in ("media", "bigfile", "zarr", "parquet", "fabriks", "konnektion", "kulisse") if (conf := getattr(self.config, key)) is not None})
         for bucket in buckets:
             try:
                 existing = self._s3.get_bucket_lifecycle_configuration(Bucket=bucket).get("Rules", [])
             except Exception:  # noqa: BLE001 - no configuration yet is an error in S3's dialect
                 existing = []
-            rules = [existing_rule for existing_rule in existing if existing_rule.get("ID") != self.LIFECYCLE_RULE_ID] + [rule]
+            rules: list[LifecycleRuleUnionTypeDef] = [existing_rule for existing_rule in existing if existing_rule.get("ID") != self.LIFECYCLE_RULE_ID]
+            rules.append(rule)
             self._s3.put_bucket_lifecycle_configuration(Bucket=bucket, LifecycleConfiguration={"Rules": rules})
         return buckets
 
