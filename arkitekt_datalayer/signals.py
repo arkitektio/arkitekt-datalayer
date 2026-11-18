@@ -19,7 +19,7 @@ from django.db.models.signals import post_delete
 logger = logging.getLogger(__name__)
 
 
-def _purge_after_commit(sender: type, instance: Any, **kwargs: Any) -> None:  # noqa: ANN401 - Django's signal signature
+def _purge_after_commit(sender: type, instance: Any, **kwargs: Any) -> None:
     from arkitekt_datalayer.models import DatalayerStore
 
     # A store is always a subclass; the base row goes as its parent, and is the same bytes.
@@ -31,7 +31,7 @@ def _purge_after_commit(sender: type, instance: Any, **kwargs: Any) -> None:  # 
     def purge() -> None:
         try:
             instance.purge_bytes()
-        except Exception:  # noqa: BLE001 - the row is gone; the log is all that is left
+        except Exception:
             logger.exception("Could not delete the bytes of %s %s (%s/%s) after its row was deleted; they are now unreferenced.", type(instance).__name__, instance.pk, instance.bucket, instance.key)
 
     transaction.on_commit(purge)

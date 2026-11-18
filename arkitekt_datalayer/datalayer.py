@@ -3,9 +3,9 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, TypeVar, cast
-from collections.abc import Callable
 
 import boto3
 from botocore.config import Config
@@ -2170,7 +2170,7 @@ class Datalayer:
                         continue
                     self._s3.abort_multipart_upload(Bucket=conf.bucket, Key=upload["Key"], UploadId=upload["UploadId"])
                     aborted += 1
-        except Exception:  # noqa: BLE001 - the lifecycle rule is the backstop
+        except Exception:
             logger.warning("Could not abort incomplete multipart uploads under %s/%s.", conf.bucket, listed, exc_info=True)
         return aborted
 
