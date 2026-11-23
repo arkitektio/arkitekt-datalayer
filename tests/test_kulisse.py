@@ -35,9 +35,21 @@ def triangle(**extra: Any) -> tuple[dict[str, Any], bytes]:
         "asset": {"version": "2.0", "generator": "kulisse 1"},
         "buffers": [{"byteLength": len(binary)}],
         "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(binary)}],
-        "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 0]}],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5126,
+                "count": 3,
+                "type": "VEC3",
+                "min": [0, 0, 0],
+                "max": [1, 1, 0],
+            }
+        ],
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
-        "nodes": [{"name": "turret", "translation": [10, 0, 0], "children": [1]}, {"name": "stage_x", "mesh": 0}],
+        "nodes": [
+            {"name": "turret", "translation": [10, 0, 0], "children": [1]},
+            {"name": "stage_x", "mesh": 0},
+        ],
         "scenes": [{"nodes": [0]}],
     }
     document.update(extra)
@@ -45,16 +57,35 @@ def triangle(**extra: Any) -> tuple[dict[str, Any], bytes]:
 
 
 def read(data: bytes, policy: KulissePolicy | None = None):  # noqa: ANN201
-    return read_model(lambda start, length: data[start : start + length], len(data), policy)
+    return read_model(
+        lambda start, length: data[start : start + length], len(data), policy
+    )
 
 
-def refused(data: bytes, policy: KulissePolicy | None = None, size: int | None = None) -> KulisseRefused:
+def refused(
+    data: bytes, policy: KulissePolicy | None = None, size: int | None = None
+) -> KulisseRefused:
     with pytest.raises(KulisseRefused) as caught:
-        read_model(lambda start, length: data[start : start + length], size if size is not None else len(data), policy)
+        read_model(
+            lambda start, length: data[start : start + length],
+            size if size is not None else len(data),
+            policy,
+        )
     return caught.value
 
 
-JOINTS = {"version": 1, "joints": [{"name": "x", "node": "stage_x", "type": "prismatic", "axis": [1, 0, 0], "limit": {"lower": 0, "upper": 0.1}}]}
+JOINTS = {
+    "version": 1,
+    "joints": [
+        {
+            "name": "x",
+            "node": "stage_x",
+            "type": "prismatic",
+            "axis": [1, 0, 0],
+            "limit": {"lower": 0, "upper": 0.1},
+        }
+    ],
+}
 
 
 # --- the reader -----------------------------------------------------------------------------
@@ -65,18 +96,31 @@ def test_a_model_is_described_from_its_header_and_json():
 
     assert (manifest.spec_version, manifest.generator) == ("2.0", "kulisse 1")
     assert manifest.nodes == ["stage_x", "turret"]
-    assert manifest.stats == {"nodes": 2, "triangles": 1, "textures": 0, "animations": 0}
+    assert manifest.stats == {
+        "nodes": 2,
+        "triangles": 1,
+        "textures": 0,
+        "animations": 0,
+    }
     assert manifest.joints[0]["name"] == "x"
-    assert manifest.bounds == {"min": [10, 0, 0], "max": [11, 1, 0]}, "the box is carried through the parent's translation"
+    assert manifest.bounds == {"min": [10, 0, 0], "max": [11, 1, 0]}, (
+        "the box is carried through the parent's translation"
+    )
 
 
 def test_the_box_follows_a_rotation():
     document, binary = triangle()
-    document["nodes"][0] = {"name": "turret", "rotation": [0, 0, math.sin(math.pi / 4), math.cos(math.pi / 4)], "children": [1]}
+    document["nodes"][0] = {
+        "name": "turret",
+        "rotation": [0, 0, math.sin(math.pi / 4), math.cos(math.pi / 4)],
+        "children": [1],
+    }
     bounds = read(glb(document, binary)).bounds
 
     assert bounds is not None
-    assert [round(v, 6) for v in bounds["min"]] == [-1, 0, 0] and [round(v, 6) for v in bounds["max"]] == [0, 1, 0]
+    assert [round(v, 6) for v in bounds["min"]] == [-1, 0, 0] and [
+        round(v, 6) for v in bounds["max"]
+    ] == [0, 1, 0]
 
 
 def test_only_the_head_and_the_json_chunk_are_read():
@@ -89,7 +133,9 @@ def test_only_the_head_and_the_json_chunk_are_read():
 
     read_model(reader, len(data))
     json_length = struct.unpack_from("<I", data, 12)[0]
-    assert asked == [(0, 20), (20, json_length), (20 + json_length, 8)], "header, JSON chunk, binary chunk header -- never the binary chunk"
+    assert asked == [(0, 20), (20, json_length), (20 + json_length, 8)], (
+        "header, JSON chunk, binary chunk header -- never the binary chunk"
+    )
 
 
 @pytest.mark.parametrize(
@@ -116,16 +162,33 @@ def test_a_model_carries_all_its_data():
 
 
 def test_a_broken_joint_table_is_refused():
-    table = {"version": 1, "joints": [{"name": "x", "node": "nowhere", "type": "prismatic", "axis": [1, 0, 0], "limit": {"lower": 0, "upper": 1}}]}
+    table = {
+        "version": 1,
+        "joints": [
+            {
+                "name": "x",
+                "node": "nowhere",
+                "type": "prismatic",
+                "axis": [1, 0, 0],
+                "limit": {"lower": 0, "upper": 1},
+            }
+        ],
+    }
     assert refused(glb(*triangle(extras={"arkitekt": table}))).code == "bad_extras"
-    assert refused(glb(*triangle(extras={"arkitekt": {"version": 2}}))).code == "bad_extras"
+    assert (
+        refused(glb(*triangle(extras={"arkitekt": {"version": 2}}))).code
+        == "bad_extras"
+    )
 
 
 def test_the_policy_bounds_size_and_counts():
     data = glb(*triangle())
     assert refused(data, KulissePolicy(max_size=len(data) - 1)).code == "too_large"
     assert refused(data, KulissePolicy(max_triangles=0)).code == "over_budget"
-    assert refused(glb(*triangle(extensionsRequired=["EXT_unknown"]))).code == "unsupported_extension"
+    assert (
+        refused(glb(*triangle(extensionsRequired=["EXT_unknown"]))).code
+        == "unsupported_extension"
+    )
 
 
 def test_unconventional_names_and_ignored_extensions_are_warnings():
@@ -140,29 +203,56 @@ def test_unconventional_names_and_ignored_extensions_are_warnings():
 # --- the store on RustFS --------------------------------------------------------------------
 
 
-async def test_a_model_upload_is_read_and_described_when_it_is_finished(aexecute, datalayer, client_s3):
+async def test_a_model_upload_is_read_and_described_when_it_is_finished(
+    aexecute, datalayer, client_s3
+):
     data = glb(*triangle(extras={"arkitekt": JOINTS}))
-    grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data["requestKulisseUpload"]
+    grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data[
+        "requestKulisseUpload"
+    ]
     assert grant["uploadContentType"] == "model/gltf-binary"
     client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=data)
 
-    finished = (await aexecute(FINISH, {"id": grant["store"]})).data["finishKulisseUpload"]
+    finished = (await aexecute(FINISH, {"id": grant["store"]})).data[
+        "finishKulisseUpload"
+    ]
 
     import hashlib
 
     assert finished["ref"] == "sha256:" + hashlib.sha256(data).hexdigest()
     assert finished["bounds"] == {"min": [10, 0, 0], "max": [11, 1, 0]}
-    assert finished["nodes"] == ["stage_x", "turret"] and finished["joints"][0]["node"] == "stage_x"
-    assert finished["stats"] == {"nodes": 2, "triangles": 1, "textures": 0, "animations": 0}
+    assert (
+        finished["nodes"] == ["stage_x", "turret"]
+        and finished["joints"][0]["node"] == "stage_x"
+    )
+    assert finished["stats"] == {
+        "nodes": 2,
+        "triangles": 1,
+        "textures": 0,
+        "animations": 0,
+    }
     assert finished["sizeBytes"] == len(data)
 
-    access = (await aexecute(ACCESS, {"id": grant["store"]})).data["requestKulisseAccess"]
-    assert client_s3(access).get_object(Bucket=access["bucket"], Key=access["key"])["Body"].read() == data
+    access = (await aexecute(ACCESS, {"id": grant["store"]})).data[
+        "requestKulisseAccess"
+    ]
+    assert (
+        client_s3(access)
+        .get_object(Bucket=access["bucket"], Key=access["key"])["Body"]
+        .read()
+        == data
+    )
 
 
-async def test_a_file_that_is_not_a_model_fails_its_finish(aexecute, datalayer, client_s3):
-    grant = (await aexecute(REQUEST, {"name": "notes.txt", "size": 28})).data["requestKulisseUpload"]
-    client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=b"definitely not a binary glTF")
+async def test_a_file_that_is_not_a_model_fails_its_finish(
+    aexecute, datalayer, client_s3
+):
+    grant = (await aexecute(REQUEST, {"name": "notes.txt", "size": 28})).data[
+        "requestKulisseUpload"
+    ]
+    client_s3(grant).put_object(
+        Bucket=grant["bucket"], Key=grant["key"], Body=b"definitely not a binary glTF"
+    )
 
     result = await aexecute(FINISH, {"id": grant["store"]}, allow_errors=True)
 
@@ -170,26 +260,40 @@ async def test_a_file_that_is_not_a_model_fails_its_finish(aexecute, datalayer, 
     assert not (await models.KulisseStore.objects.aget(id=grant["store"])).populated
 
 
-async def test_a_declared_size_over_the_policy_gets_no_grant(aexecute, datalayer, settings):
+async def test_a_declared_size_over_the_policy_gets_no_grant(
+    aexecute, datalayer, settings
+):
     settings.DATALAYER = {**settings.DATALAYER, "kulisse_policy": {"max_size": 100}}
     import arkitekt_datalayer.datalayer as dl_module
 
     dl_module.GLOBAL_DL = None
-    result = await aexecute(REQUEST, {"name": "big.glb", "size": 101}, allow_errors=True)
+    result = await aexecute(
+        REQUEST, {"name": "big.glb", "size": 101}, allow_errors=True
+    )
 
     assert "over the limit of 100" in result.errors[0].message
     assert not await models.KulisseStore.objects.aexists()
 
 
-async def test_another_organization_cannot_read_a_model(aexecute, datalayer, client_s3, other_org_context):
+async def test_another_organization_cannot_read_a_model(
+    aexecute, datalayer, client_s3, other_org_context
+):
     data = glb(*triangle())
-    grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data["requestKulisseUpload"]
+    grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data[
+        "requestKulisseUpload"
+    ]
     client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=data)
     await aexecute(FINISH, {"id": grant["store"]})
 
-    assert (await aexecute(ACCESS, {"id": grant["store"]}, context=other_org_context, allow_errors=True)).errors
+    assert (
+        await aexecute(
+            ACCESS, {"id": grant["store"]}, context=other_org_context, allow_errors=True
+        )
+    ).errors
     with pytest.raises(ClientError):
-        client_s3(grant).put_object(Bucket=grant["bucket"], Key=f"{grant['key']}-sibling", Body=data)
+        client_s3(grant).put_object(
+            Bucket=grant["bucket"], Key=f"{grant['key']}-sibling", Body=data
+        )
 
 
 @pytest.fixture
@@ -198,11 +302,26 @@ def organization(transactional_db) -> Organization:  # noqa: ANN001
 
 
 def test_a_model_the_server_writes_is_checked_too(datalayer, organization):
-    store = datalayer.store_bytes(models.KulisseStore, organization.id, glb(*triangle()), original_file_name="stage.glb", content_type="model/gltf-binary")
+    store = datalayer.store_bytes(
+        models.KulisseStore,
+        organization.id,
+        glb(*triangle()),
+        original_file_name="stage.glb",
+        content_type="model/gltf-binary",
+    )
 
     store.refresh_from_db()
-    assert store.populated and store.nodes == ["stage_x", "turret"] and store.ref and store.ref.startswith("sha256:")
+    assert (
+        store.populated
+        and store.nodes == ["stage_x", "turret"]
+        and store.ref
+        and store.ref.startswith("sha256:")
+    )
 
     with pytest.raises(KulisseRefused):
-        datalayer.store_bytes(models.KulisseStore, organization.id, b"not a model, refused and gone")
-    assert models.KulisseStore.objects.count() == 1, "a refused model leaves no row behind"
+        datalayer.store_bytes(
+            models.KulisseStore, organization.id, b"not a model, refused and gone"
+        )
+    assert models.KulisseStore.objects.count() == 1, (
+        "a refused model leaves no row behind"
+    )

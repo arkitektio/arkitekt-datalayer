@@ -47,7 +47,9 @@ MANIFEST = {
         "cells": {"path": "catalog/cells.parquet", "bytes": 91244, "rowGroups": 1},
         "objects": {"path": "catalog/objects.parquet", "bytes": 20481},
         "levels": {
-            "0": [{"path": "level0/part-00000.parquet", "bytes": 8443210, "rowGroups": 4}],
+            "0": [
+                {"path": "level0/part-00000.parquet", "bytes": 8443210, "rowGroups": 4}
+            ],
             "1": [{"path": "level1/part-00000.parquet", "bytes": 2110992}],
             "2": [{"path": "level2/part-00000.parquet", "bytes": 530771}],
         },
@@ -71,7 +73,11 @@ class _FakeS3:
 
 @pytest.fixture()
 def layer(settings) -> Datalayer:
-    settings.DATALAYER = {"access_key": "k", "secret_key": "s", "fabriks": {"bucket": "meshes"}}
+    settings.DATALAYER = {
+        "access_key": "k",
+        "secret_key": "s",
+        "fabriks": {"bucket": "meshes"},
+    }
     return Datalayer()
 
 
@@ -92,11 +98,17 @@ def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Dat
 
     metadata = layer.get_fabriks_metadata(_store())
 
-    assert fake.requested == [("meshes", "abc123/fabriks.json")], "the manifest sits at the root of the prefix"
+    assert fake.requested == [("meshes", "abc123/fabriks.json")], (
+        "the manifest sits at the root of the prefix"
+    )
     assert metadata.spec_version == "1"
-    assert metadata.grid["cellSize"] == [128, 128, 64], "anisotropic, in x/y/z -- carried through unchanged"
+    assert metadata.grid["cellSize"] == [128, 128, 64], (
+        "anisotropic, in x/y/z -- carried through unchanged"
+    )
     assert metadata.encoding["codec"] == "MESHOPT"
-    assert metadata.encoding["compression"] == "NONE", "a writer's real choice, never defaulted on its behalf"
+    assert metadata.encoding["compression"] == "NONE", (
+        "a writer's real choice, never defaulted on its behalf"
+    )
     assert metadata.axes == ["z", "y", "x"]
 
 
@@ -112,7 +124,9 @@ def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Dat
     with pytest.raises(FileNotFoundError) as excinfo:
         layer.get_fabriks_metadata(_store())
 
-    assert "uploads the manifest last" in str(excinfo.value), "the message must name the likely cause, not just the missing key"
+    assert "uploads the manifest last" in str(excinfo.value), (
+        "the message must name the likely cause, not just the missing key"
+    )
 
 
 def test_a_half_written_manifest_is_refused(layer: Datalayer):
@@ -137,11 +151,19 @@ def test_the_file_entries_are_read_in_both_shapes(layer: Datalayer):
     assert manifest.cells_path == "catalog/cells.parquet"
     assert manifest.level_paths(0) == ["level0/part-00000.parquet"]
 
-    bare = {**MANIFEST, "files": {"cells": "catalog/cells.parquet", "levels": {"0": ["level0/part-00000.parquet"]}}}
+    bare = {
+        **MANIFEST,
+        "files": {
+            "cells": "catalog/cells.parquet",
+            "levels": {"0": ["level0/part-00000.parquet"]},
+        },
+    }
     plain = fabriks_format.parse_manifest(json.dumps(bare).encode())
     assert plain.cells_path == "catalog/cells.parquet"
     assert plain.level_paths(0) == ["level0/part-00000.parquet"]
-    assert plain.objects_path == "catalog/objects.parquet", "an unnamed catalog falls back to where the format puts it"
+    assert plain.objects_path == "catalog/objects.parquet", (
+        "an unnamed catalog falls back to where the format puts it"
+    )
 
 
 def test_a_manifest_that_names_no_parts_says_so_rather_than_nothing():
@@ -151,9 +173,13 @@ def test_a_manifest_that_names_no_parts_says_so_rather_than_nothing():
     otherwise list the prefix. So "this manifest does not say" has to be distinguishable from
     "this level is empty", or a reader silently draws nothing.
     """
-    without = fabriks_format.parse_manifest(json.dumps({**MANIFEST, "files": {}}).encode())
+    without = fabriks_format.parse_manifest(
+        json.dumps({**MANIFEST, "files": {}}).encode()
+    )
     assert without.level_paths(0) is None
-    assert without.cells_path == "catalog/cells.parquet", "the format's own layout is the fallback"
+    assert without.cells_path == "catalog/cells.parquet", (
+        "the format's own layout is the fallback"
+    )
 
 
 def test_the_vocabulary_matches_the_format_rather_than_the_servers_older_rules():
@@ -165,26 +191,51 @@ def test_the_vocabulary_matches_the_format_rather_than_the_servers_older_rules()
     file; refusing it here would reject collections fabriks legitimately produces.
     """
     for decimation in ("QUARTER", "HALF", "EIGHTH", "CUSTOM"):
-        manifest = fabriks_format.parse_manifest(json.dumps({**MANIFEST, "encoding": {**MANIFEST["encoding"], "decimation": decimation}}).encode())
+        manifest = fabriks_format.parse_manifest(
+            json.dumps(
+                {
+                    **MANIFEST,
+                    "encoding": {**MANIFEST["encoding"], "decimation": decimation},
+                }
+            ).encode()
+        )
         assert manifest.encoding["decimation"] == decimation
 
-    opened = fabriks_format.parse_manifest(json.dumps({**MANIFEST, "encoding": {**MANIFEST["encoding"], "boundary": "OPEN"}}).encode())
+    opened = fabriks_format.parse_manifest(
+        json.dumps(
+            {**MANIFEST, "encoding": {**MANIFEST["encoding"], "boundary": "OPEN"}}
+        ).encode()
+    )
     assert opened.encoding["boundary"] == "OPEN"
 
     with pytest.raises(fabriks_format.ManifestError, match="does not define"):
-        fabriks_format.parse_manifest(json.dumps({**MANIFEST, "encoding": {**MANIFEST["encoding"], "codec": "DRACO"}}).encode())
+        fabriks_format.parse_manifest(
+            json.dumps(
+                {**MANIFEST, "encoding": {**MANIFEST["encoding"], "codec": "DRACO"}}
+            ).encode()
+        )
 
 
 def test_axes_are_optional_and_checked_only_when_stated():
     """Nothing in the format decodes through `axes`, so absent is legitimate -- wrong is not."""
-    without = fabriks_format.parse_manifest(json.dumps({key: value for key, value in MANIFEST.items() if key != "axes"}).encode())
-    assert without.axes is None, "a collection that never claimed an axis order is readable in full"
+    without = fabriks_format.parse_manifest(
+        json.dumps(
+            {key: value for key, value in MANIFEST.items() if key != "axes"}
+        ).encode()
+    )
+    assert without.axes is None, (
+        "a collection that never claimed an axis order is readable in full"
+    )
 
     with pytest.raises(fabriks_format.ManifestError, match="names 3 axes"):
-        fabriks_format.parse_manifest(json.dumps({**MANIFEST, "axes": ["z", "y"]}).encode())
+        fabriks_format.parse_manifest(
+            json.dumps({**MANIFEST, "axes": ["z", "y"]}).encode()
+        )
 
     with pytest.raises(fabriks_format.ManifestError, match="each axis once"):
-        fabriks_format.parse_manifest(json.dumps({**MANIFEST, "axes": ["z", "z", "x"]}).encode())
+        fabriks_format.parse_manifest(
+            json.dumps({**MANIFEST, "axes": ["z", "z", "x"]}).encode()
+        )
 
 
 def test_an_unreadable_format_version_is_refused(layer: Datalayer):
@@ -206,7 +257,12 @@ def test_an_unreadable_format_version_is_refused(layer: Datalayer):
 def test_a_manifest_missing_grid_or_encoding_is_refused(layer: Datalayer):
     """Nothing else in the prefix states them, so a manifest without them is undecodable."""
     for dropped in ("grid", "encoding"):
-        _with_body(layer, json.dumps({key: value for key, value in MANIFEST.items() if key != dropped}).encode())
+        _with_body(
+            layer,
+            json.dumps(
+                {key: value for key, value in MANIFEST.items() if key != dropped}
+            ).encode(),
+        )
 
         with pytest.raises(ValueError, match="must carry a `grid` and an `encoding`"):
             layer.get_fabriks_metadata(_store())
@@ -234,5 +290,10 @@ def test_a_part_path_that_leaves_the_store_is_refused(path: str):
 
 
 def test_a_written_part_path_is_accepted():
-    assert fabriks_format.cells_path_of({"cells": {"path": "catalog/cells.parquet", "bytes": 1}}) == "catalog/cells.parquet"
+    assert (
+        fabriks_format.cells_path_of(
+            {"cells": {"path": "catalog/cells.parquet", "bytes": 1}}
+        )
+        == "catalog/cells.parquet"
+    )
     assert fabriks_format.cells_path_of({}) == fabriks_format.CELL_CATALOG_PATH

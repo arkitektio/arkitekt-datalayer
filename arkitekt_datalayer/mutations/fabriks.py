@@ -19,39 +19,67 @@ def request_fabriks_upload(info: Info) -> types.FabriksUploadGrant:
     """Request temporary S3 upload credentials for a fabriks store's prefix."""
     dl = get_current_datalayer()
     organization_id, user = caller(info)
-    return types.FabriksUploadGrant.from_pydantic(dl.generate_fabriks_upload_grant(organization_id, user=user))
+    return types.FabriksUploadGrant.from_pydantic(
+        dl.generate_fabriks_upload_grant(organization_id, user=user)
+    )
 
 
-def finish_fabriks_upload(info: Info, input: inputs.FinishFabriksUploadInput) -> types.FabriksStore:
+def finish_fabriks_upload(
+    info: Info, input: inputs.FinishFabriksUploadInput
+) -> types.FabriksStore:
     """Mark the FabriksStore populated, reading its manifest to learn what was written."""
     dl = get_current_datalayer()
     input_model = input.to_pydantic()
     organization_id, user = caller(info)
-    return cast(types.FabriksStore, dl.finish_fabriks_upload(organization_id, input_model, user=user))
+    return cast(
+        types.FabriksStore,
+        dl.finish_fabriks_upload(organization_id, input_model, user=user),
+    )
 
 
-def refresh_fabriks_upload(info: Info, input: inputs.RefreshUploadInput) -> types.FabriksUploadGrant:
+def refresh_fabriks_upload(
+    info: Info, input: inputs.RefreshUploadInput
+) -> types.FabriksUploadGrant:
     """Reissue upload credentials for a fabriks upload still in flight, to the same key."""
     dl = get_current_datalayer()
     organization_id, user = caller(info)
-    grant = dl.refresh_upload_grant(models.FabriksStore, organization_id, input.to_pydantic().store_id, user=user)
-    return types.FabriksUploadGrant.from_pydantic(cast("base_models.FabriksUploadGrant", grant))
+    grant = dl.refresh_upload_grant(
+        models.FabriksStore, organization_id, input.to_pydantic().store_id, user=user
+    )
+    return types.FabriksUploadGrant.from_pydantic(
+        cast("base_models.FabriksUploadGrant", grant)
+    )
 
 
-def request_fabriks_access(info: Info, input: inputs.RequestFabriksAccessInput) -> types.FabriksAccessGrant:
+def request_fabriks_access(
+    info: Info, input: inputs.RequestFabriksAccessInput
+) -> types.FabriksAccessGrant:
     """Request temporary S3 read credentials covering a fabriks store's whole prefix."""
     dl = get_current_datalayer()
 
     model = input.to_pydantic()
 
-    store = models.FabriksStore.objects.get(id=model.store_id, organization=info.context.request.organization, populated=True, orphaned_at__isnull=True)
-    return types.FabriksAccessGrant.from_pydantic(dl.generate_fabriks_access_grant(store))
+    store = models.FabriksStore.objects.get(
+        id=model.store_id,
+        organization=info.context.request.organization,
+        populated=True,
+        orphaned_at__isnull=True,
+    )
+    return types.FabriksAccessGrant.from_pydantic(
+        dl.generate_fabriks_access_grant(store)
+    )
 
 
-def request_general_fabriks_access(info: Info, input: inputs.RequestGeneralFabriksAccessInput) -> types.GeneralFabriksAccessGrant:
+def request_general_fabriks_access(
+    info: Info, input: inputs.RequestGeneralFabriksAccessInput
+) -> types.GeneralFabriksAccessGrant:
     """Request organization-wide temporary S3 read credentials for fabriks stores."""
     dl = get_current_datalayer()
     model = input.to_pydantic()
 
     organization_id, user = caller(info)
-    return types.GeneralFabriksAccessGrant.from_pydantic(dl.generate_general_fabriks_access_grant(organization_id, user.pk, expires_in=model.expires_in))
+    return types.GeneralFabriksAccessGrant.from_pydantic(
+        dl.generate_general_fabriks_access_grant(
+            organization_id, user.pk, expires_in=model.expires_in
+        )
+    )

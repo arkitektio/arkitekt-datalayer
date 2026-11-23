@@ -31,10 +31,14 @@ def _purge(*args: str) -> str:
 
 
 def _age(store: models.DatalayerStore, days: int) -> None:
-    models.DatalayerStore.objects.filter(pk=store.pk).update(orphaned_at=timezone.now() - datetime.timedelta(days=days))
+    models.DatalayerStore.objects.filter(pk=store.pk).update(
+        orphaned_at=timezone.now() - datetime.timedelta(days=days)
+    )
 
 
-def test_deleting_a_row_flags_its_store_and_the_purge_deletes_bytes_then_row(datalayer, organization):
+def test_deleting_a_row_flags_its_store_and_the_purge_deletes_bytes_then_row(
+    datalayer, organization
+):
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"statement")
     _delete(Document.objects.create(store=store))
     _age(store, 8)
@@ -48,7 +52,9 @@ def test_deleting_a_row_flags_its_store_and_the_purge_deletes_bytes_then_row(dat
 
 
 def test_a_prefix_store_is_purged_as_a_tree(datalayer, organization):
-    zarr = models.ZarrStore.objects.create(organization=organization, key="tree", bucket="zarr")
+    zarr = models.ZarrStore.objects.create(
+        organization=organization, key="tree", bucket="zarr"
+    )
     for name in ("zarr.json", "c/0/0", "c/0/1"):
         datalayer.put_file("zarr", f"tree/{name}", b"x")
     _delete(Image.objects.create(data=zarr))
@@ -73,13 +79,17 @@ def test_a_store_another_row_still_holds_is_kept_and_unflagged(datalayer, organi
 
 def test_an_upload_in_flight_is_never_touched(datalayer, organization):
     """Unreferenced is the normal state of an upload in progress: only a flag makes a store collectable."""
-    store = models.MediaStore.objects.create(organization=organization, key="in-flight", bucket="media")
+    store = models.MediaStore.objects.create(
+        organization=organization, key="in-flight", bucket="media"
+    )
 
     assert "nothing orphaned" in _purge("--older-than", "0")
     assert models.DatalayerStore.objects.filter(pk=store.pk).exists()
 
 
-def test_the_grace_period_holds_and_dry_run_deletes_nothing(datalayer, organization, settings):
+def test_the_grace_period_holds_and_dry_run_deletes_nothing(
+    datalayer, organization, settings
+):
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"recent")
     _delete(Document.objects.create(store=store))
     _age(store, 2)
@@ -90,8 +100,12 @@ def test_the_grace_period_holds_and_dry_run_deletes_nothing(datalayer, organizat
     assert datalayer.read_object("bigfile", store.key) == b"recent"
 
 
-def test_a_nullable_reference_orphans_nothing_when_it_is_already_empty(datalayer, organization):
-    zarr = models.ZarrStore.objects.create(organization=organization, key="no-thumb", bucket="zarr")
+def test_a_nullable_reference_orphans_nothing_when_it_is_already_empty(
+    datalayer, organization
+):
+    zarr = models.ZarrStore.objects.create(
+        organization=organization, key="no-thumb", bucket="zarr"
+    )
     image = Image.objects.create(data=zarr, thumbnail=None)
 
     assert [store.pk for store in storage.stores_orphaned_by(image)] == [zarr.pk]
@@ -99,7 +113,12 @@ def test_a_nullable_reference_orphans_nothing_when_it_is_already_empty(datalayer
 
 def test_an_abandoned_upload_is_purged_with_its_bytes(datalayer, organization):
     """Past its deadline an unfinished upload can never be finished or referenced: collect it."""
-    store = models.ZarrStore.objects.create(organization=organization, key="1/abandoned", bucket="zarr", upload_expires_at=timezone.now() - datetime.timedelta(minutes=1))
+    store = models.ZarrStore.objects.create(
+        organization=organization,
+        key="1/abandoned",
+        bucket="zarr",
+        upload_expires_at=timezone.now() - datetime.timedelta(minutes=1),
+    )
     datalayer.put_file("zarr", "1/abandoned/zarr.json", b"{}")
 
     output = _purge()
@@ -110,23 +129,37 @@ def test_an_abandoned_upload_is_purged_with_its_bytes(datalayer, organization):
 
 
 def test_an_upload_before_its_deadline_is_left_alone(datalayer, organization):
-    store = models.ZarrStore.objects.create(organization=organization, key="1/running", bucket="zarr", upload_expires_at=timezone.now() + datetime.timedelta(minutes=30))
+    store = models.ZarrStore.objects.create(
+        organization=organization,
+        key="1/running",
+        bucket="zarr",
+        upload_expires_at=timezone.now() + datetime.timedelta(minutes=30),
+    )
 
     _purge()
 
     assert models.DatalayerStore.objects.filter(pk=store.pk).exists()
 
 
-def test_purging_a_store_aborts_its_unfinished_multipart_upload(datalayer, organization):
+def test_purging_a_store_aborts_its_unfinished_multipart_upload(
+    datalayer, organization
+):
     """Parts are invisible to a listing, so a purge that only deletes objects would leave them."""
-    store = models.BigFileStore.objects.create(organization=organization, key="1/parts", bucket="bigfile", upload_expires_at=timezone.now() - datetime.timedelta(minutes=1))
+    store = models.BigFileStore.objects.create(
+        organization=organization,
+        key="1/parts",
+        bucket="bigfile",
+        upload_expires_at=timezone.now() - datetime.timedelta(minutes=1),
+    )
     bucket = datalayer.get_bucket_config("bigfile").bucket
     full_key = datalayer.build_object_key("bigfile", store.key)
     datalayer._s3.create_multipart_upload(Bucket=bucket, Key=full_key)
 
     _purge()
 
-    open_uploads = datalayer._s3.list_multipart_uploads(Bucket=bucket, Prefix=full_key).get("Uploads", [])
+    open_uploads = datalayer._s3.list_multipart_uploads(
+        Bucket=bucket, Prefix=full_key
+    ).get("Uploads", [])
     assert open_uploads == []
 
 
@@ -141,7 +174,9 @@ def test_a_bulk_delete_takes_the_bytes_with_the_rows(datalayer, organization):
         datalayer.read_object("bigfile", store.key)
 
 
-def test_a_key_is_segmented_by_the_issuer_qualified_organization(datalayer, organization):
+def test_a_key_is_segmented_by_the_issuer_qualified_organization(
+    datalayer, organization
+):
     """The segment comes from `identifier`, not the local pk: a local id names different tenants
     in different services, and services share buckets."""
     twin = Organization.objects.create(identifier="https://another-lok#static_org")
@@ -149,5 +184,7 @@ def test_a_key_is_segmented_by_the_issuer_qualified_organization(datalayer, orga
     key = datalayer._new_key(organization.id)
 
     assert key.startswith(datalayer.organization_segment(organization.id) + "/")
-    assert datalayer.organization_segment(twin.id) != datalayer.organization_segment(organization.id), "the same org claim from another lok is another tenant"
+    assert datalayer.organization_segment(twin.id) != datalayer.organization_segment(
+        organization.id
+    ), "the same org claim from another lok is another tenant"
     assert "#" not in key and ":" not in key, "the segment is key-safe"

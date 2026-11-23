@@ -87,7 +87,10 @@ def _doomed_rows(collector: Collector) -> list[tuple[type, Iterable]]:
     `ArrayDataset` flagged nothing at all, because every pyramid level took the shortcut. The
     querysets are evaluated here -- a few rows per delete, and the alternative is losing them.
     """
-    rows: list[tuple[type, Iterable]] = [(model, doomed) for model, doomed in collector.data.items()]  # pyright: ignore[reportAttributeAccessIssue] -- django-types omits Collector.data
+    rows: list[tuple[type, Iterable]] = [
+        (model, doomed)
+        for model, doomed in collector.data.items()  # pyright: ignore[reportAttributeAccessIssue] -- django-types omits Collector.data
+    ]
     rows.extend((queryset.model, list(queryset)) for queryset in collector.fast_deletes)  # pyright: ignore[reportAttributeAccessIssue] -- nor fast_deletes
     return rows
 

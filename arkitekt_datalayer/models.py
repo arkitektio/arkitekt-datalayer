@@ -60,14 +60,38 @@ class DatalayerStore(PolymorphicModel):
         related_name="+",
         help_text="The user who requested the upload grant, whose storage quota the bytes count against. Null for stores written before this was recorded.",
     )
-    path = models.CharField(max_length=1000, null=True, blank=True, help_text="The object-store URI of the file", unique=True)
-    key = models.CharField(max_length=1000, help_text="The object key/path within the datalayer bucket.")
-    bucket = models.CharField(max_length=1000, help_text="The datalayer bucket/service this store belongs to.")
-    original_file_name = models.CharField(max_length=1000, null=True, blank=True, help_text="The original client-provided file name.")
-    content_type = models.CharField(max_length=255, null=True, blank=True, help_text="The client-provided content type for the uploaded file.")
+    path = models.CharField(
+        max_length=1000,
+        null=True,
+        blank=True,
+        help_text="The object-store URI of the file",
+        unique=True,
+    )
+    key = models.CharField(
+        max_length=1000, help_text="The object key/path within the datalayer bucket."
+    )
+    bucket = models.CharField(
+        max_length=1000, help_text="The datalayer bucket/service this store belongs to."
+    )
+    original_file_name = models.CharField(
+        max_length=1000,
+        null=True,
+        blank=True,
+        help_text="The original client-provided file name.",
+    )
+    content_type = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="The client-provided content type for the uploaded file.",
+    )
     # `db_default` as well as `default`: rows are also inserted by raw SQL (rekuest's takt), which
     # never sees a Python default.
-    populated = models.BooleanField(default=False, db_default=False, help_text="Whether the store has been populated with a valid path and is ready for use.")
+    populated = models.BooleanField(
+        default=False,
+        db_default=False,
+        help_text="Whether the store has been populated with a valid path and is ready for use.",
+    )
     max_bytes = models.BigIntegerField(
         null=True,
         blank=True,
@@ -91,7 +115,11 @@ class DatalayerStore(PolymorphicModel):
         ),
     )
     # `db_default` for the reason `populated` gives: raw SQL inserts never see a Python default.
-    created_at = models.DateTimeField(auto_now_add=True, db_default=Now(), help_text="When the upload grant that made this store was requested.")
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_default=Now(),
+        help_text="When the upload grant that made this store was requested.",
+    )
     upload_expires_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -126,13 +154,19 @@ class DatalayerStore(PolymorphicModel):
             PermissionError: If the store is unfinished or orphaned.
         """
         if not self.populated:
-            raise PermissionError(f"{type(self).__name__} {self.pk} is an unfinished upload, so there is nothing to read yet.")
+            raise PermissionError(
+                f"{type(self).__name__} {self.pk} is an unfinished upload, so there is nothing to read yet."
+            )
         if self.orphaned_at is not None:
-            raise PermissionError(f"{type(self).__name__} {self.pk} belongs to deleted data, so it is not readable.")
+            raise PermissionError(
+                f"{type(self).__name__} {self.pk} belongs to deleted data, so it is not readable."
+            )
 
     def grant_read_access(self, datalayer: Datalayer) -> AccessGrant:
         """Return temporary credentials for reading this store."""
-        return datalayer.generate_file_read_url(self.bucket, self.key, store_id=str(self.pk))
+        return datalayer.generate_file_read_url(
+            self.bucket, self.key, store_id=str(self.pk)
+        )
 
     def fill_info(self, datalayer: Datalayer | None = None) -> None:
         """Finalize the store after a successful upload."""
@@ -168,7 +202,9 @@ class DatalayerStore(PolymorphicModel):
         layer = datalayer or Datalayer()
         if self.is_prefix:
             return layer.measure_prefix_bytes(self.bucket, self.key)
-        return layer.get_object_size(self.bucket, layer.build_object_key(self.bucket, self.key))
+        return layer.get_object_size(
+            self.bucket, layer.build_object_key(self.bucket, self.key)
+        )
 
     def measured_size(self, datalayer: Datalayer | None = None) -> int | None:
         """This store's size on disk, or ``None`` if it could not be read. Never raises.
@@ -182,7 +218,12 @@ class DatalayerStore(PolymorphicModel):
         try:
             return self.measure_bytes(datalayer)
         except Exception:
-            logger.warning("Could not measure the bytes held by %s store %s; leaving size_bytes unset.", self.bucket, self.pk, exc_info=True)
+            logger.warning(
+                "Could not measure the bytes held by %s store %s; leaving size_bytes unset.",
+                self.bucket,
+                self.pk,
+                exc_info=True,
+            )
             return None
 
     def measure_declared(self, datalayer: Datalayer) -> int:
@@ -201,7 +242,9 @@ class DatalayerStore(PolymorphicModel):
         size = self.measure_bytes(datalayer)
         if self.declared_bytes is not None and size > self.declared_bytes:
             self.purge_bytes(datalayer)
-            raise ValueError(f"{type(self).__name__} {self.pk} holds {size} bytes, more than the {self.declared_bytes} its upload declared. The upload was refused and its bytes deleted; ask for a grant with the real size.")
+            raise ValueError(
+                f"{type(self).__name__} {self.pk} holds {size} bytes, more than the {self.declared_bytes} its upload declared. The upload was refused and its bytes deleted; ask for a grant with the real size."
+            )
         return size
 
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
@@ -222,7 +265,9 @@ class DatalayerStore(PolymorphicModel):
         self._bytes_purged = True
         return super().delete(*args, **kwargs)
 
-    def read_bytes(self, datalayer: Datalayer | None = None, *, max_bytes: int | None = None) -> bytes:
+    def read_bytes(
+        self, datalayer: Datalayer | None = None, *, max_bytes: int | None = None
+    ) -> bytes:
         """This store's object, read with service credentials. Single-object stores only.
 
         Raises:
@@ -230,7 +275,9 @@ class DatalayerStore(PolymorphicModel):
             FileNotFoundError: If nothing was uploaded.
         """
         if self.is_prefix:
-            raise ValueError(f"{type(self).__name__} {self.pk} is a prefix store, so it has no single object to read.")
+            raise ValueError(
+                f"{type(self).__name__} {self.pk} is a prefix store, so it has no single object to read."
+            )
         layer = datalayer or Datalayer()
         return layer.read_object(self.bucket, self.key, max_bytes=max_bytes)
 
@@ -332,17 +379,59 @@ class ZarrStore(DatalayerStore):
     # a 204 having deleted nothing, which is why removing one needs list + batched delete.
     is_prefix: ClassVar[bool] = True
 
-    shape = models.JSONField(null=True, blank=True, help_text="The shape of the Zarr array stored at this location.")
-    chunks = models.JSONField(null=True, blank=True, help_text="The effective inner chunk shape of the Zarr array — the unit a reader can decode. For sharded arrays this is the sharding codec's inner chunk shape, not the chunk grid's.")
-    shards = models.JSONField(null=True, blank=True, help_text="The shard (outer storage object) shape when the array uses zarr v3 sharding_indexed; null for unsharded arrays. When set, `chunks` holds the inner chunk shape.")
-    version = models.CharField(max_length=10, null=True, blank=True, help_text="The Zarr format version of the array stored at this location.")
-    dtype = models.CharField(max_length=255, null=True, blank=True, help_text="The dtype of the Zarr array stored at this location.")
-    dimension_names = models.JSONField(null=True, blank=True, help_text="The dimension names declared by the Zarr array.")
-    fill_value = models.JSONField(null=True, blank=True, help_text="The fill value declared by the Zarr array.")
-    attributes = models.JSONField(null=True, blank=True, help_text="The user attributes stored in zarr.json.")
-    storage_transformers = models.JSONField(null=True, blank=True, help_text="The storage transformers declared by the Zarr array.")
-    chunk_key_encoding = models.JSONField(null=True, blank=True, help_text="The chunk key encoding configuration for the Zarr array.")
-    codecs = models.JSONField(null=True, blank=True, help_text="The codec pipeline declared for the Zarr array.")
+    shape = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The shape of the Zarr array stored at this location.",
+    )
+    chunks = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The effective inner chunk shape of the Zarr array — the unit a reader can decode. For sharded arrays this is the sharding codec's inner chunk shape, not the chunk grid's.",
+    )
+    shards = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The shard (outer storage object) shape when the array uses zarr v3 sharding_indexed; null for unsharded arrays. When set, `chunks` holds the inner chunk shape.",
+    )
+    version = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="The Zarr format version of the array stored at this location.",
+    )
+    dtype = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="The dtype of the Zarr array stored at this location.",
+    )
+    dimension_names = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The dimension names declared by the Zarr array.",
+    )
+    fill_value = models.JSONField(
+        null=True, blank=True, help_text="The fill value declared by the Zarr array."
+    )
+    attributes = models.JSONField(
+        null=True, blank=True, help_text="The user attributes stored in zarr.json."
+    )
+    storage_transformers = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The storage transformers declared by the Zarr array.",
+    )
+    chunk_key_encoding = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The chunk key encoding configuration for the Zarr array.",
+    )
+    codecs = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The codec pipeline declared for the Zarr array.",
+    )
 
     def grant_read_access(self, datalayer: Datalayer) -> base_models.ZarrAccessGrant:
         """Return temporary credentials for reading this Zarr prefix."""
@@ -451,7 +540,9 @@ class ParquetStore(DatalayerStore):
         # Before the columns: a file the viewer cannot decode is not one to register, and the
         # codec is in the same footer the DESCRIBE reads.
         layer.refuse_unreadable_table(self)
-        self.columns = [column.model_dump() for column in layer.get_parquet_schema(self)]
+        self.columns = [
+            column.model_dump() for column in layer.get_parquet_schema(self)
+        ]
         # Measured here rather than beside the finish mutation because `fill_info` is the
         # one point both entry paths reach: the `finish*Upload` mutations and the core
         # create mutations, which call this directly. Non-fatal, and it never overwrites a
@@ -505,12 +596,37 @@ class FabriksStore(DatalayerStore):
     # success, so removal needs list + batched delete.
     is_prefix: ClassVar[bool] = True
 
-    spec_version = models.CharField(max_length=64, null=True, blank=True, help_text="The mesh format version declared by the store's manifest.")
-    grid = models.JSONField(null=True, blank=True, help_text="The octree grid declared by the manifest: cellSize (in voxels, ordered x/y/z), levels and sortKey.")
-    encoding = models.JSONField(null=True, blank=True, help_text="The geometry encoding declared by the manifest: how positions, normals and indices are packed and compressed.")
-    axes = models.JSONField(null=True, blank=True, help_text="The axis order the writer states it wrote, used to refuse a collection whose declared axes disagree with its geometry.")
-    counts = models.JSONField(null=True, blank=True, help_text="Object and per-level cell counts declared by the manifest. Convenience for budgeting; never authoritative.")
-    files = models.JSONField(null=True, blank=True, help_text="The file layout the manifest claims. A claim, not authority -- the prefix listing is what a check reads.")
+    spec_version = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="The mesh format version declared by the store's manifest.",
+    )
+    grid = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The octree grid declared by the manifest: cellSize (in voxels, ordered x/y/z), levels and sortKey.",
+    )
+    encoding = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The geometry encoding declared by the manifest: how positions, normals and indices are packed and compressed.",
+    )
+    axes = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The axis order the writer states it wrote, used to refuse a collection whose declared axes disagree with its geometry.",
+    )
+    counts = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Object and per-level cell counts declared by the manifest. Convenience for budgeting; never authoritative.",
+    )
+    files = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The file layout the manifest claims. A claim, not authority -- the prefix listing is what a check reads.",
+    )
 
     def grant_read_access(self, datalayer: Datalayer) -> base_models.FabriksAccessGrant:
         """Return temporary credentials for reading this fabriks prefix."""
@@ -533,7 +649,9 @@ class FabriksStore(DatalayerStore):
         layer = datalayer or Datalayer()
         self.path = self.build_store_path(layer)
         metadata = layer.get_fabriks_metadata(self)
-        layer.refuse_unreadable_collection_parts(self.path, fabriks_format.cells_path_of(metadata.files), kind="mesh")
+        layer.refuse_unreadable_collection_parts(
+            self.path, fabriks_format.cells_path_of(metadata.files), kind="mesh"
+        )
         self.spec_version = metadata.spec_version
         self.grid = metadata.grid
         self.encoding = metadata.encoding
@@ -548,7 +666,19 @@ class FabriksStore(DatalayerStore):
         if measured is not None:
             self.size_bytes = measured
         self.populated = True
-        self.save(update_fields=["path", "spec_version", "grid", "encoding", "axes", "counts", "files", "populated", "size_bytes"])
+        self.save(
+            update_fields=[
+                "path",
+                "spec_version",
+                "grid",
+                "encoding",
+                "axes",
+                "counts",
+                "files",
+                "populated",
+                "size_bytes",
+            ]
+        )
 
 
 class KonnektionStore(DatalayerStore):
@@ -591,21 +721,52 @@ class KonnektionStore(DatalayerStore):
     # the prefix would delete nothing and report success, so removal needs list + batched delete.
     is_prefix: ClassVar[bool] = True
 
-    spec_version = models.CharField(max_length=64, null=True, blank=True, help_text="The network format version declared by the store's manifest.")
-    grid = models.JSONField(null=True, blank=True, help_text="The octree grid declared by the manifest: cellSize (in voxels, ordered x/y/z), levels and sortKey.")
-    encoding = models.JSONField(null=True, blank=True, help_text="The geometry encoding declared by the manifest: how positions, edges, node ids, radii and ghosts are packed and compressed, and which coarsening operations each level ran.")
-    axes = models.JSONField(null=True, blank=True, help_text="The axis order the writer states it wrote, used to refuse a collection whose declared axes disagree with its geometry.")
-    counts = models.JSONField(null=True, blank=True, help_text="Object and per-level cell counts declared by the manifest. Convenience for budgeting; never authoritative.")
-    files = models.JSONField(null=True, blank=True, help_text="The file layout the manifest claims. A claim, not authority -- the prefix listing is what a check reads.")
+    spec_version = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="The network format version declared by the store's manifest.",
+    )
+    grid = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The octree grid declared by the manifest: cellSize (in voxels, ordered x/y/z), levels and sortKey.",
+    )
+    encoding = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The geometry encoding declared by the manifest: how positions, edges, node ids, radii and ghosts are packed and compressed, and which coarsening operations each level ran.",
+    )
+    axes = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The axis order the writer states it wrote, used to refuse a collection whose declared axes disagree with its geometry.",
+    )
+    counts = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Object and per-level cell counts declared by the manifest. Convenience for budgeting; never authoritative.",
+    )
+    files = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The file layout the manifest claims. A claim, not authority -- the prefix listing is what a check reads.",
+    )
     attributes = models.JSONField(
-        null=True, blank=True, help_text="The per-node value columns the manifest declares, each {name, encoding, semantics}. What a network layer's graph colorBys are validated against; null on a store filled before attributes existed, which reads the same as declaring none."
+        null=True,
+        blank=True,
+        help_text="The per-node value columns the manifest declares, each {name, encoding, semantics}. What a network layer's graph colorBys are validated against; null on a store filled before attributes existed, which reads the same as declaring none.",
     )
 
-    def grant_read_access(self, datalayer: Datalayer) -> base_models.KonnektionAccessGrant:
+    def grant_read_access(
+        self, datalayer: Datalayer
+    ) -> base_models.KonnektionAccessGrant:
         """Return temporary credentials for reading this konnektion prefix."""
         return datalayer.generate_konnektion_access_grant(self)
 
-    def get_access_grant(self, datalayer: Datalayer) -> base_models.KonnektionAccessGrant:
+    def get_access_grant(
+        self, datalayer: Datalayer
+    ) -> base_models.KonnektionAccessGrant:
         """Return temporary credentials for reading the object prefix."""
         self.refuse_unreadable()
         return self.grant_read_access(datalayer)
@@ -620,8 +781,15 @@ class KonnektionStore(DatalayerStore):
         one.
         """
         attributes = self.attributes if isinstance(self.attributes, list) else []
-        names = [str(entry["name"]) for entry in attributes if isinstance(entry, dict) and "name" in entry]
-        if isinstance(self.encoding, dict) and self.encoding.get("radii", "NONE") != "NONE":
+        names = [
+            str(entry["name"])
+            for entry in attributes
+            if isinstance(entry, dict) and "name" in entry
+        ]
+        if (
+            isinstance(self.encoding, dict)
+            and self.encoding.get("radii", "NONE") != "NONE"
+        ):
             names.append("radius")
         return names
 
@@ -636,7 +804,9 @@ class KonnektionStore(DatalayerStore):
         layer = datalayer or Datalayer()
         self.path = self.build_store_path(layer)
         metadata = layer.get_konnektion_metadata(self)
-        layer.refuse_unreadable_collection_parts(self.path, konnektion_format.cells_path_of(metadata.files), kind="network")
+        layer.refuse_unreadable_collection_parts(
+            self.path, konnektion_format.cells_path_of(metadata.files), kind="network"
+        )
         self.spec_version = metadata.spec_version
         self.grid = metadata.grid
         self.encoding = metadata.encoding
@@ -652,7 +822,20 @@ class KonnektionStore(DatalayerStore):
         if measured is not None:
             self.size_bytes = measured
         self.populated = True
-        self.save(update_fields=["path", "spec_version", "grid", "encoding", "axes", "counts", "files", "attributes", "populated", "size_bytes"])
+        self.save(
+            update_fields=[
+                "path",
+                "spec_version",
+                "grid",
+                "encoding",
+                "axes",
+                "counts",
+                "files",
+                "attributes",
+                "populated",
+                "size_bytes",
+            ]
+        )
 
 
 class SparseStore(DatalayerStore):
@@ -702,7 +885,11 @@ class SparseStore(DatalayerStore):
         blank=True,
         help_text="The version of the `sporadik` block this store was accepted under. A spec selects how every byte in the prefix is read, so an unknown one is refused rather than guessed at",
     )
-    shape = models.JSONField(null=True, blank=True, help_text="The shape of the matrix, as the root block declares it and every layout agrees. Two axes")
+    shape = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The shape of the matrix, as the root block declares it and every layout agrees. Two axes",
+    )
     layouts = models.JSONField(
         null=True,
         blank=True,
@@ -757,7 +944,16 @@ class SparseStore(DatalayerStore):
         if measured is not None:
             self.size_bytes = measured
         self.populated = True
-        self.save(update_fields=["path", "spec", "shape", "layouts", "populated", "size_bytes"])
+        self.save(
+            update_fields=[
+                "path",
+                "spec",
+                "shape",
+                "layouts",
+                "populated",
+                "size_bytes",
+            ]
+        )
 
     @property
     def encodings(self) -> list[str]:
@@ -799,15 +995,53 @@ class KulisseStore(DatalayerStore):
 
     bucket_key: ClassVar[str] = "kulisse"
 
-    ref = models.CharField(max_length=71, null=True, blank=True, db_index=True, help_text="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating the model names as `for_model`.")
-    spec_version = models.CharField(max_length=16, null=True, blank=True, help_text="The glTF version the model declares (`asset.version`).")
-    generator = models.CharField(max_length=255, null=True, blank=True, help_text="The tool that wrote the model, as it says (`asset.generator`).")
-    bounds = models.JSONField(null=True, blank=True, help_text="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates, read from its accessor bounds through every node transform. Null when nothing declares a box.")
-    stats = models.JSONField(null=True, blank=True, help_text="What the model contains: `{nodes, triangles, textures, animations}`, counted from its JSON.")
-    nodes = models.JSONField(null=True, blank=True, help_text="The named nodes a blok can address (`for_node`, a joint's `node`), sorted.")
-    joints = models.JSONField(null=True, blank=True, help_text="The joint table of `extras.arkitekt` (name, node, type, axis, limit, mimic), empty for a rigid model.")
-    extensions_used = models.JSONField(null=True, blank=True, help_text="The glTF extensions the model uses.")
-    warnings = models.JSONField(null=True, blank=True, help_text="What the reader noticed but did not refuse: repeated or unconventional node names, extensions viewers ignore.")
+    ref = models.CharField(
+        max_length=71,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating the model names as `for_model`.",
+    )
+    spec_version = models.CharField(
+        max_length=16,
+        null=True,
+        blank=True,
+        help_text="The glTF version the model declares (`asset.version`).",
+    )
+    generator = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="The tool that wrote the model, as it says (`asset.generator`).",
+    )
+    bounds = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates, read from its accessor bounds through every node transform. Null when nothing declares a box.",
+    )
+    stats = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="What the model contains: `{nodes, triangles, textures, animations}`, counted from its JSON.",
+    )
+    nodes = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The named nodes a blok can address (`for_node`, a joint's `node`), sorted.",
+    )
+    joints = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="The joint table of `extras.arkitekt` (name, node, type, axis, limit, mimic), empty for a rigid model.",
+    )
+    extensions_used = models.JSONField(
+        null=True, blank=True, help_text="The glTF extensions the model uses."
+    )
+    warnings = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="What the reader noticed but did not refuse: repeated or unconventional node names, extensions viewers ignore.",
+    )
 
     def grant_read_access(self, datalayer: Datalayer) -> base_models.KulisseAccessGrant:
         """Return temporary credentials for reading this model."""
@@ -841,4 +1075,19 @@ class KulisseStore(DatalayerStore):
         self.warnings = manifest.warnings
         self.size_bytes = size
         self.populated = True
-        self.save(update_fields=["path", "ref", "spec_version", "generator", "bounds", "stats", "nodes", "joints", "extensions_used", "warnings", "size_bytes", "populated"])
+        self.save(
+            update_fields=[
+                "path",
+                "ref",
+                "spec_version",
+                "generator",
+                "bounds",
+                "stats",
+                "nodes",
+                "joints",
+                "extensions_used",
+                "warnings",
+                "size_bytes",
+                "populated",
+            ]
+        )

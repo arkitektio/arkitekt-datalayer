@@ -12,7 +12,9 @@ from arkitekt_datalayer.datalayer import load_config
 
 def upload_mutation(**kwargs) -> strawberry.mutation:  # noqa: ANN003
     """A mutation that hands out or finishes upload credentials, for ``datalayer.upload_roles`` only."""
-    return kante.django_mutation(extensions=[AuthExtension(any_role_of=load_config().upload_roles)], **kwargs)
+    return kante.django_mutation(
+        extensions=[AuthExtension(any_role_of=load_config().upload_roles)], **kwargs
+    )
 
 
 def mutation(**kwargs) -> strawberry.mutation:  # noqa: ANN003
@@ -34,7 +36,9 @@ class Mutation:
     finish_media_upload = upload_mutation(resolver=mutations.finish_media_upload)
     refresh_media_upload = upload_mutation(resolver=mutations.refresh_media_upload)
     request_media_access = mutation(resolver=mutations.request_media_access)
-    request_general_media_access = mutation(resolver=mutations.request_general_media_access)
+    request_general_media_access = mutation(
+        resolver=mutations.request_general_media_access
+    )
 
     request_bigfile_upload = upload_mutation(resolver=mutations.request_bigfile_upload)
     finish_bigfile_upload = upload_mutation(resolver=mutations.finish_bigfile_upload)
@@ -45,7 +49,9 @@ class Mutation:
     finish_zarr_upload = upload_mutation(resolver=mutations.finish_zarr_upload)
     refresh_zarr_upload = upload_mutation(resolver=mutations.refresh_zarr_upload)
     request_zarr_access = mutation(resolver=mutations.request_zarr_access)
-    request_general_zarr_access = mutation(resolver=mutations.request_general_zarr_access)
+    request_general_zarr_access = mutation(
+        resolver=mutations.request_general_zarr_access
+    )
 
     request_parquet_upload = upload_mutation(resolver=mutations.request_parquet_upload)
     finish_parquet_upload = upload_mutation(resolver=mutations.finish_parquet_upload)
@@ -60,15 +66,23 @@ class Mutation:
     finish_fabriks_upload = upload_mutation(resolver=mutations.finish_fabriks_upload)
     refresh_fabriks_upload = upload_mutation(resolver=mutations.refresh_fabriks_upload)
 
-    request_konnektion_upload = upload_mutation(resolver=mutations.request_konnektion_upload)
-    finish_konnektion_upload = upload_mutation(resolver=mutations.finish_konnektion_upload)
-    refresh_konnektion_upload = upload_mutation(resolver=mutations.refresh_konnektion_upload)
+    request_konnektion_upload = upload_mutation(
+        resolver=mutations.request_konnektion_upload
+    )
+    finish_konnektion_upload = upload_mutation(
+        resolver=mutations.finish_konnektion_upload
+    )
+    refresh_konnektion_upload = upload_mutation(
+        resolver=mutations.refresh_konnektion_upload
+    )
 
     request_kulisse_upload = upload_mutation(resolver=mutations.request_kulisse_upload)
     finish_kulisse_upload = upload_mutation(resolver=mutations.finish_kulisse_upload)
     refresh_kulisse_upload = upload_mutation(resolver=mutations.refresh_kulisse_upload)
     request_kulisse_access = mutation(resolver=mutations.request_kulisse_access)
-    request_general_kulisse_access = mutation(resolver=mutations.request_general_kulisse_access)
+    request_general_kulisse_access = mutation(
+        resolver=mutations.request_general_kulisse_access
+    )
 
 
 schema = strawberry.federation.Schema(

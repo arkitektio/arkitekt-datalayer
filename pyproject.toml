@@ -19,7 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.39.8",
+    "basedpyright==1.40.2",
     "django-types>=0.24.0",
     "dokker>=2.8",
     "psycopg[binary]>=3",
@@ -28,27 +28,13 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-django>=4.11.1",
     "python-semantic-release>=9.21.0",
-    "ruff>=0.15.8",
+    "ruff==0.17.6",
     "types-boto3[s3,sts]>=1.38",
 ]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "test_project.settings"
 asyncio_mode = "auto"
-
-[tool.basedpyright]
-include = ["arkitekt_datalayer"]
-exclude = ["**/migrations", "**/__pycache__"]
-typeCheckingMode = "standard"
-
-[tool.ruff]
-exclude = [".venv", "tests", "test_project", "test_app", "**/migrations"]
-line-length = 300
-target-version = "py312"
-
-[tool.ruff.lint]
-extend-select = ["ANN", "D1", "UP"]
-extend-ignore = ["ANN002", "ANN003", "D100", "D104", "ANN401", "UP037", "UP038", "UP042", "UP040", "UP046", "UP047", "UP049"]
 
 [tool.hatch.build.targets.sdist]
 include = ["arkitekt_datalayer"]

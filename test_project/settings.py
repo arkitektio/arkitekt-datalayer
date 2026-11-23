@@ -19,7 +19,9 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = "authentikate.User"
 
 AUTHENTIKATE = {
-    "issuers": [{"kind": "jwks_dict", "iss": "placeholder_issuer", "jwks": {"keys": []}}],
+    "issuers": [
+        {"kind": "jwks_dict", "iss": "placeholder_issuer", "jwks": {"keys": []}}
+    ],
     "audience": "datalayer",
     "allow_static_tokens_in_production": True,
     "static_tokens": {

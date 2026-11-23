@@ -32,14 +32,16 @@ import json
 
 import pytest
 
-from arkitekt_datalayer.datalayer import Datalayer
 from arkitekt_datalayer import models
+from arkitekt_datalayer.datalayer import Datalayer
 from arkitekt_datalayer.models import sparse_layout_path
 
 CHUNK = 32_768
 
 
-def _array(nelements: int, dtype: str = "float32", chunk: int = CHUNK, compressed: bool = True) -> dict:
+def _array(
+    nelements: int, dtype: str = "float32", chunk: int = CHUNK, compressed: bool = True
+) -> dict:
     """A zarr v3 array's `zarr.json`, cut down to the keys this reads."""
     codecs = [{"name": "bytes"}] + ([{"name": "zstd"}] if compressed else [])
     return {
@@ -57,7 +59,11 @@ def _layout_group(encoding: str, shape: tuple[int, ...]) -> dict:
     return {
         "zarr_format": 3,
         "node_type": "group",
-        "attributes": {"encoding-type": encoding, "encoding-version": "0.1.0", "shape": list(shape)},
+        "attributes": {
+            "encoding-type": encoding,
+            "encoding-version": "0.1.0",
+            "shape": list(shape),
+        },
     }
 
 
@@ -131,13 +137,26 @@ def _tree(
         order = [other for other in range(len(shape)) if other != axis]
         path = sparse_layout_path(axis)
         entries.append({"path": path, "indexed_axis": axis, "index_order": order})
-        tree[f"{path}/zarr.json"] = _layout_group(_encoding_for(shape, axis), tuple(_declared_shape(shape, axis, order)))
+        tree[f"{path}/zarr.json"] = _layout_group(
+            _encoding_for(shape, axis), tuple(_declared_shape(shape, axis, order))
+        )
         tree[f"{path}/data/zarr.json"] = _array(nnz, compressed=compressed)
-        tree[f"{path}/indices/zarr.json"] = _array(nnz, dtype="int32", compressed=compressed)
-        tree[f"{path}/indptr/zarr.json"] = _array(shape[axis] + 1, dtype="int32", compressed=compressed)
+        tree[f"{path}/indices/zarr.json"] = _array(
+            nnz, dtype="int32", compressed=compressed
+        )
+        tree[f"{path}/indptr/zarr.json"] = _array(
+            shape[axis] + 1, dtype="int32", compressed=compressed
+        )
 
     tree["zarr.json"] = _root(
-        block if block is not None else {"spec": spec, "complete": complete, "shape": list(shape), "layouts": entries}
+        block
+        if block is not None
+        else {
+            "spec": spec,
+            "complete": complete,
+            "shape": list(shape),
+            "layouts": entries,
+        }
     )
     return tree
 
@@ -170,7 +189,10 @@ def test_both_layouts_of_one_matrix_are_one_store() -> None:
     metadata = _layer(_tree(axes=(0, 1))).get_sparse_metadata(_Store())
 
     assert [layout.indexed_axis for layout in metadata.layouts] == [0, 1]
-    assert [layout.encoding for layout in metadata.layouts] == ["csr_matrix", "csc_matrix"]
+    assert [layout.encoding for layout in metadata.layouts] == [
+        "csr_matrix",
+        "csc_matrix",
+    ]
     # `indptr` walks the compressed axis, so its length is what tells the two apart.
     assert [layout.chunks["indptr"] for layout in metadata.layouts] == [CHUNK, CHUNK]
 
@@ -179,8 +201,12 @@ def test_an_uncompressed_single_chunk_store_is_range_readable() -> None:
     """Derived off the codecs, never declared: one chunk and no compressor, or it is not."""
     tree = _tree(nnz=CHUNK, compressed=False)
     for name in ("data", "indices"):
-        tree[f"layouts/axis0/{name}/zarr.json"]["chunk_grid"]["configuration"]["chunk_shape"] = [CHUNK]
-    tree["layouts/axis0/indptr/zarr.json"]["chunk_grid"]["configuration"]["chunk_shape"] = [5]
+        tree[f"layouts/axis0/{name}/zarr.json"]["chunk_grid"]["configuration"][
+            "chunk_shape"
+        ] = [CHUNK]
+    tree["layouts/axis0/indptr/zarr.json"]["chunk_grid"]["configuration"][
+        "chunk_shape"
+    ] = [5]
 
     assert _layer(tree).get_sparse_metadata(_Store()).layouts[0].range_readable is True
 
@@ -188,7 +214,9 @@ def test_an_uncompressed_single_chunk_store_is_range_readable() -> None:
 def test_a_compressed_single_chunk_store_is_not_range_readable() -> None:
     """Both halves matter: a compressor makes a byte offset meaningless on its own."""
     tree = _tree(nnz=CHUNK, compressed=True)
-    tree["layouts/axis0/indptr/zarr.json"]["chunk_grid"]["configuration"]["chunk_shape"] = [5]
+    tree["layouts/axis0/indptr/zarr.json"]["chunk_grid"]["configuration"][
+        "chunk_shape"
+    ] = [5]
 
     assert _layer(tree).get_sparse_metadata(_Store()).layouts[0].range_readable is False
 
@@ -227,7 +255,9 @@ def test_an_incomplete_block_is_refused() -> None:
 def test_a_block_naming_no_layouts_is_refused() -> None:
     """A store is its layouts."""
     tree = _tree()
-    tree["zarr.json"] = _root({"spec": "1", "complete": True, "shape": [4, 3], "layouts": []})
+    tree["zarr.json"] = _root(
+        {"spec": "1", "complete": True, "shape": [4, 3], "layouts": []}
+    )
 
     with pytest.raises(ValueError, match="names no layouts"):
         _layer(tree).get_sparse_metadata(_Store())
@@ -270,9 +300,19 @@ def test_two_layouts_compressing_one_axis_are_refused() -> None:
 def test_a_layout_filed_under_the_wrong_name_is_refused() -> None:
     """Read from the wrong path it is indexed along the wrong axis -- a real, wrong slice."""
     tree = _tree(axes=(1,))
-    for suffix in ("zarr.json", "data/zarr.json", "indices/zarr.json", "indptr/zarr.json"):
+    for suffix in (
+        "zarr.json",
+        "data/zarr.json",
+        "indices/zarr.json",
+        "indptr/zarr.json",
+    ):
         tree[f"layouts/axis0/{suffix}"] = tree.pop(f"layouts/axis1/{suffix}")
-    block = {"spec": "1", "complete": True, "shape": [4, 3], "layouts": [{"path": "layouts/axis0", "indexed_axis": 1, "index_order": [0]}]}
+    block = {
+        "spec": "1",
+        "complete": True,
+        "shape": [4, 3],
+        "layouts": [{"path": "layouts/axis0", "indexed_axis": 1, "index_order": [0]}],
+    }
     tree["zarr.json"] = _root(block)
 
     with pytest.raises(ValueError, match="filed under the wrong name"):
@@ -309,7 +349,16 @@ def test_a_layout_shape_that_disagrees_with_the_store_is_refused() -> None:
 def test_a_shape_of_one_axis_is_refused() -> None:
     """A compressed axis needs at least one other to hold the positions."""
     tree = _tree()
-    tree["zarr.json"] = _root({"spec": "1", "complete": True, "shape": [4], "layouts": [{"path": "layouts/axis0", "indexed_axis": 0, "index_order": []}]})
+    tree["zarr.json"] = _root(
+        {
+            "spec": "1",
+            "complete": True,
+            "shape": [4],
+            "layouts": [
+                {"path": "layouts/axis0", "indexed_axis": 0, "index_order": []}
+            ],
+        }
+    )
 
     with pytest.raises(ValueError, match="at least 2 axes"):
         _layer(tree).get_sparse_metadata(_Store())
@@ -342,10 +391,14 @@ def test_an_indptr_that_disagrees_with_the_shape_is_refused() -> None:
         _layer(tree).get_sparse_metadata(_Store())
 
 
-def test_the_indptr_check_follows_the_compressed_axis_rather_than_the_first_one() -> None:
+def test_the_indptr_check_follows_the_compressed_axis_rather_than_the_first_one() -> (
+    None
+):
     """The check that would pass by accident on a square matrix, so it is asserted on 4x3."""
     tree = _tree(axes=(1,))
-    tree["layouts/axis1/indptr/zarr.json"]["shape"] = [5]  # 4 + 1: right for axis 0, wrong for axis 1
+    tree["layouts/axis1/indptr/zarr.json"]["shape"] = [
+        5
+    ]  # 4 + 1: right for axis 0, wrong for axis 1
 
     with pytest.raises(ValueError, match="holds 4 entries"):
         _layer(tree).get_sparse_metadata(_Store())
@@ -356,11 +409,17 @@ def test_the_indptr_check_follows_the_compressed_axis_rather_than_the_first_one(
 # --------------------------------------------------------------------------- #
 def test_a_rank_three_store_reads_back_every_layout() -> None:
     """A layout is one axis made contiguous, so an array of rank n has up to n of them."""
-    metadata = _layer(_tree(shape=(4, 3, 2), axes=(0, 1, 2))).get_sparse_metadata(_Store())
+    metadata = _layer(_tree(shape=(4, 3, 2), axes=(0, 1, 2))).get_sparse_metadata(
+        _Store()
+    )
 
     assert metadata.shape == [4, 3, 2]
     assert [layout.indexed_axis for layout in metadata.layouts] == [0, 1, 2]
-    assert [layout.index_order for layout in metadata.layouts] == [[1, 2], [0, 2], [0, 1]]
+    assert [layout.index_order for layout in metadata.layouts] == [
+        [1, 2],
+        [0, 2],
+        [0, 1],
+    ]
     # Above rank two the child holds the raveled two-axis view, which really is a csr_matrix.
     assert {layout.encoding for layout in metadata.layouts} == {"csr_matrix"}
 
@@ -382,7 +441,14 @@ def test_an_index_order_that_is_not_a_permutation_is_refused() -> None:
     writer states it and this refuses one that cannot be right.
     """
     tree = _tree(shape=(4, 3, 2), axes=(0,))
-    block = {"spec": "1", "complete": True, "shape": [4, 3, 2], "layouts": [{"path": "layouts/axis0", "indexed_axis": 0, "index_order": [1, 1]}]}
+    block = {
+        "spec": "1",
+        "complete": True,
+        "shape": [4, 3, 2],
+        "layouts": [
+            {"path": "layouts/axis0", "indexed_axis": 0, "index_order": [1, 1]}
+        ],
+    }
     tree["zarr.json"] = _root(block)
 
     with pytest.raises(ValueError, match="not a permutation"):
@@ -392,7 +458,16 @@ def test_an_index_order_that_is_not_a_permutation_is_refused() -> None:
 def test_an_indexed_axis_outside_the_shape_is_refused() -> None:
     """Naming an axis the array does not have."""
     tree = _tree()
-    tree["zarr.json"] = _root({"spec": "1", "complete": True, "shape": [4, 3], "layouts": [{"path": "layouts/axis7", "indexed_axis": 7, "index_order": [0]}]})
+    tree["zarr.json"] = _root(
+        {
+            "spec": "1",
+            "complete": True,
+            "shape": [4, 3],
+            "layouts": [
+                {"path": "layouts/axis7", "indexed_axis": 7, "index_order": [0]}
+            ],
+        }
+    )
 
     with pytest.raises(ValueError, match="not an axis of"):
         _layer(tree).get_sparse_metadata(_Store())
@@ -450,15 +525,33 @@ def test_every_invariant_the_specification_lists_has_a_refusal_here() -> None:
     merely hopes for. A named test that stops existing fails this.
     """
     proven = {
-        "indptr length": (test_an_indptr_that_disagrees_with_the_shape_is_refused, test_the_indptr_check_follows_the_compressed_axis_rather_than_the_first_one),
+        "indptr length": (
+            test_an_indptr_that_disagrees_with_the_shape_is_refused,
+            test_the_indptr_check_follows_the_compressed_axis_rather_than_the_first_one,
+        ),
         "parallel arrays": (test_values_and_indices_of_different_lengths_are_refused,),
         "path names the axis": (test_a_layout_filed_under_the_wrong_name_is_refused,),
-        "index_order is a permutation": (test_an_index_order_that_is_not_a_permutation_is_refused,),
-        "child shape and encoding by rank": (test_a_layout_whose_encoding_contradicts_its_axis_is_refused, test_a_rank_three_layout_declares_its_raveled_shape),
-        "one layout per axis, at most rank": (test_two_layouts_compressing_one_axis_are_refused, test_more_layouts_than_axes_is_refused),
-        "the block is present and complete": (test_a_store_with_no_block_is_refused, test_an_incomplete_block_is_refused),
-        "the spec version is known": (test_an_unknown_spec_is_refused_rather_than_guessed_at,),
+        "index_order is a permutation": (
+            test_an_index_order_that_is_not_a_permutation_is_refused,
+        ),
+        "child shape and encoding by rank": (
+            test_a_layout_whose_encoding_contradicts_its_axis_is_refused,
+            test_a_rank_three_layout_declares_its_raveled_shape,
+        ),
+        "one layout per axis, at most rank": (
+            test_two_layouts_compressing_one_axis_are_refused,
+            test_more_layouts_than_axes_is_refused,
+        ),
+        "the block is present and complete": (
+            test_a_store_with_no_block_is_refused,
+            test_an_incomplete_block_is_refused,
+        ),
+        "the spec version is known": (
+            test_an_unknown_spec_is_refused_rather_than_guessed_at,
+        ),
     }
     for invariant, tests in proven.items():
         assert all(callable(test) for test in tests), invariant
-    assert len(proven) == 8, "the specification lists eight things a conforming reader checks"
+    assert len(proven) == 8, (
+        "the specification lists eight things a conforming reader checks"
+    )

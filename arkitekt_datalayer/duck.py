@@ -52,7 +52,9 @@ class DuckLayer:
         connection.execute(secret_query)
         return connection
 
-    def sql(self, query: str, params: dict[str, object] | None = None) -> duckdb.DuckDBPyRelation:
+    def sql(
+        self, query: str, params: dict[str, object] | None = None
+    ) -> duckdb.DuckDBPyRelation:
         """Run a query against the S3-configured connection and return the relation.
 
         Anything that came from outside -- a location, a path a manifest named -- goes in

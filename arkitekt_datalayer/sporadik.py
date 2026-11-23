@@ -82,10 +82,16 @@ def anndata_encoding(rank: int, indexed_axis: int) -> str:
     axes, which genuinely is a ``csr_matrix``, so that is what it says -- and the block carries the
     real shape and the ravel order.
     """
-    return ("csr_matrix" if indexed_axis == 0 else "csc_matrix") if rank == MIN_RANK else "csr_matrix"
+    return (
+        ("csr_matrix" if indexed_axis == 0 else "csc_matrix")
+        if rank == MIN_RANK
+        else "csr_matrix"
+    )
 
 
-def raveled_shape(shape: list[int], indexed_axis: int, index_order: list[int]) -> list[int]:
+def raveled_shape(
+    shape: list[int], indexed_axis: int, index_order: list[int]
+) -> list[int]:
     """The shape a layout's own group declares, which above rank two is not the array's."""
     if len(shape) == MIN_RANK:
         return list(shape)
@@ -142,7 +148,9 @@ def _loads(body: bytes, *, where: str) -> dict[str, Any]:
     try:
         raw = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise StoreError(f"{where} is not valid JSON ({error}). It is {len(body)} bytes and starts {body[:80]!r} -- a truncated body is the other shape an interrupted write leaves behind.") from error
+        raise StoreError(
+            f"{where} is not valid JSON ({error}). It is {len(body)} bytes and starts {body[:80]!r} -- a truncated body is the other shape an interrupted write leaves behind."
+        ) from error
     if not isinstance(raw, dict):
         raise StoreError(f"{where} is a JSON object, got {type(raw).__name__}.")
     return raw
@@ -153,7 +161,9 @@ def _assert_node(raw: dict[str, Any], kind: str, *, where: str) -> dict[str, Any
     if raw.get("zarr_format") == 2:
         raise StoreError(f"{where} is Zarr v2. Only Zarr v3 stores are supported.")
     if raw.get("node_type") != kind:
-        raise StoreError(f"{where} declares node_type {raw.get('node_type')!r}; a sporadik store needs a {kind} here.")
+        raise StoreError(
+            f"{where} declares node_type {raw.get('node_type')!r}; a sporadik store needs a {kind} here."
+        )
     return raw
 
 
@@ -175,32 +185,48 @@ def parse_root(body: bytes, *, where: str = "the store") -> StoreReading:
     raw = _assert_node(_loads(body, where=where), "group", where=where)
     block = (raw.get("attributes") or {}).get(BLOCK_KEY)
     if not isinstance(block, dict):
-        raise StoreError(f"{where} carries no `{BLOCK_KEY}` block, so it is not a sporadik store -- or it is an upload that did not finish. The block is written last, after every chunk, which is the only point at which what it describes is actually there.")
+        raise StoreError(
+            f"{where} carries no `{BLOCK_KEY}` block, so it is not a sporadik store -- or it is an upload that did not finish. The block is written last, after every chunk, which is the only point at which what it describes is actually there."
+        )
 
     spec = str(block.get("spec", "")).strip()
     if spec not in SUPPORTED_VERSIONS:
-        raise StoreError(f"{where} declares `{BLOCK_KEY}` spec {spec!r}, which this server cannot read. Supported: {', '.join(sorted(SUPPORTED_VERSIONS))}. The version selects how every byte in the prefix is read, so an unknown one is refused rather than read as though it were familiar.")
+        raise StoreError(
+            f"{where} declares `{BLOCK_KEY}` spec {spec!r}, which this server cannot read. Supported: {', '.join(sorted(SUPPORTED_VERSIONS))}. The version selects how every byte in the prefix is read, so an unknown one is refused rather than read as though it were familiar."
+        )
     if not block.get("complete"):
-        raise StoreError(f"{where} declares `{BLOCK_KEY}` complete={block.get('complete')!r}. Only a finished store is registerable; nothing is known about what a half-written one holds.")
+        raise StoreError(
+            f"{where} declares `{BLOCK_KEY}` complete={block.get('complete')!r}. Only a finished store is registerable; nothing is known about what a half-written one holds."
+        )
 
     shape = block.get("shape")
     if not isinstance(shape, list) or len(shape) < MIN_RANK:
-        raise StoreError(f"{where} declares shape {shape!r}; a sparse array has at least {MIN_RANK} axes -- a compressed axis needs at least one other to hold the positions.")
+        raise StoreError(
+            f"{where} declares shape {shape!r}; a sparse array has at least {MIN_RANK} axes -- a compressed axis needs at least one other to hold the positions."
+        )
     shape = [int(size) for size in shape]
 
     entries = block.get("layouts")
     if not isinstance(entries, list) or not entries:
-        raise StoreError(f"{where} names no layouts, so it holds no array. A store is its layouts -- one per axis a reader might select along.")
+        raise StoreError(
+            f"{where} names no layouts, so it holds no array. A store is its layouts -- one per axis a reader might select along."
+        )
     if len(entries) > len(shape):
-        raise StoreError(f"{where} names {len(entries)} layouts over a rank-{len(shape)} array, but there is one axis to compress per axis it has. Any more would be a copy of one of the others.")
+        raise StoreError(
+            f"{where} names {len(entries)} layouts over a rank-{len(shape)} array, but there is one axis to compress per axis it has. Any more would be a copy of one of the others."
+        )
     readings: list[LayoutEntry] = []
     seen: dict[int, str] = {}
     for entry in entries:
         if not isinstance(entry, dict):
-            raise StoreError(f"{where} names layout {entry!r}, which is not a layout entry -- each names its `path`, its `indexed_axis` and its `index_order`.")
+            raise StoreError(
+                f"{where} names layout {entry!r}, which is not a layout entry -- each names its `path`, its `indexed_axis` and its `index_order`."
+            )
         reading = _entry(entry, shape, where=where)
         if reading.indexed_axis in seen:
-            raise StoreError(f"{where} names two layouts compressing axis {reading.indexed_axis} ('{seen[reading.indexed_axis]}' and '{reading.path}'). That is one capability twice, and nothing could say which a reader should use.")
+            raise StoreError(
+                f"{where} names two layouts compressing axis {reading.indexed_axis} ('{seen[reading.indexed_axis]}' and '{reading.path}'). That is one capability twice, and nothing could say which a reader should use."
+            )
         seen[reading.indexed_axis] = reading.path
         readings.append(reading)
 
@@ -212,9 +238,13 @@ def _entry(entry: dict[str, Any], shape: list[int], *, where: str) -> LayoutEntr
     path = str(entry.get("path") or "").strip("/")
     indexed_axis = entry.get("indexed_axis")
     if not isinstance(indexed_axis, int) or not 0 <= indexed_axis < len(shape):
-        raise StoreError(f"Layout '{path}' declares indexed_axis {indexed_axis!r}, which is not an axis of {shape}.")
+        raise StoreError(
+            f"Layout '{path}' declares indexed_axis {indexed_axis!r}, which is not an axis of {shape}."
+        )
     if path != layout_path(indexed_axis):
-        raise StoreError(f"Layout '{path}' compresses axis {indexed_axis}, so it is filed under the wrong name -- it belongs at '{layout_path(indexed_axis)}'. Read from the wrong path it would be indexed along the wrong axis, and every lookup would return a real, wrong slice.")
+        raise StoreError(
+            f"Layout '{path}' compresses axis {indexed_axis}, so it is filed under the wrong name -- it belongs at '{layout_path(indexed_axis)}'. Read from the wrong path it would be indexed along the wrong axis, and every lookup would return a real, wrong slice."
+        )
 
     others = [axis for axis in range(len(shape)) if axis != indexed_axis]
     index_order = entry.get("index_order")
@@ -222,10 +252,20 @@ def _entry(entry: dict[str, Any], shape: list[int], *, where: str) -> LayoutEntr
         raise StoreError(
             f"Layout '{path}' declares index_order {index_order!r}, which is not a permutation of the axes it did not compress {others}. That order is how `indices` was raveled and cannot be recovered from the bytes, so a wrong one does not fail -- it puts every value in a different cell."
         )
-    return LayoutEntry(path=path, indexed_axis=indexed_axis, index_order=[int(axis) for axis in index_order])
+    return LayoutEntry(
+        path=path,
+        indexed_axis=indexed_axis,
+        index_order=[int(axis) for axis in index_order],
+    )
 
 
-def parse_layout(entry: LayoutEntry, bodies: dict[str, bytes], shape: list[int], *, where: str = "the store") -> LayoutReading:
+def parse_layout(
+    entry: LayoutEntry,
+    bodies: dict[str, bytes],
+    shape: list[int],
+    *,
+    where: str = "the store",
+) -> LayoutReading:
     """Check one layout's own objects against the entry the block made for it.
 
     ``bodies`` carries the layout's four ``zarr.json`` objects: ``""`` for the group itself, and one
@@ -238,27 +278,44 @@ def parse_layout(entry: LayoutEntry, bodies: dict[str, bytes], shape: list[int],
     """
     path, indexed_axis, index_order = entry.path, entry.indexed_axis, entry.index_order
 
-    group = _assert_node(_loads(bodies[""], where=f"{where}/{path}"), "group", where=f"{where}/{path}")
+    group = _assert_node(
+        _loads(bodies[""], where=f"{where}/{path}"), "group", where=f"{where}/{path}"
+    )
     attributes = group.get("attributes") or {}
 
     encoding = attributes.get("encoding-type")
     expected_encoding = anndata_encoding(len(shape), indexed_axis)
     if encoding != expected_encoding:
-        raise StoreError(f"Layout '{path}' declares encoding-type {encoding!r}, but a layout compressing axis {indexed_axis} of a rank-{len(shape)} array is {expected_encoding!r}. The group's own attributes and the block disagree about what this is.")
+        raise StoreError(
+            f"Layout '{path}' declares encoding-type {encoding!r}, but a layout compressing axis {indexed_axis} of a rank-{len(shape)} array is {expected_encoding!r}. The group's own attributes and the block disagree about what this is."
+        )
 
     declared = [int(size) for size in (attributes.get("shape") or [])]
     expected_shape = raveled_shape(shape, indexed_axis, index_order)
     if declared != expected_shape:
-        raise StoreError(f"Layout '{path}' declares shape {declared}, but compressing axis {indexed_axis} of {shape} gives {expected_shape}. A store is one array in up to one layout per axis, so every layout has to be that array.")
+        raise StoreError(
+            f"Layout '{path}' declares shape {declared}, but compressing axis {indexed_axis} of {shape} gives {expected_shape}. A store is one array in up to one layout per axis, so every layout has to be that array."
+        )
 
-    arrays = {name: _assert_node(_loads(bodies[name], where=f"{where}/{path}/{name}"), "array", where=f"{where}/{path}/{name}") for name in ARRAYS}
+    arrays = {
+        name: _assert_node(
+            _loads(bodies[name], where=f"{where}/{path}/{name}"),
+            "array",
+            where=f"{where}/{path}/{name}",
+        )
+        for name in ARRAYS
+    }
 
     nnz = int(arrays["data"]["shape"][0])
     if int(arrays["indices"]["shape"][0]) != nnz:
-        raise StoreError(f"Layout '{path}' has {nnz} values and {arrays['indices']['shape'][0]} indices. They are parallel arrays, so an upload that wrote one and not the other stopped partway.")
+        raise StoreError(
+            f"Layout '{path}' has {nnz} values and {arrays['indices']['shape'][0]} indices. They are parallel arrays, so an upload that wrote one and not the other stopped partway."
+        )
     expected = shape[indexed_axis] + 1
     if int(arrays["indptr"]["shape"][0]) != expected:
-        raise StoreError(f"Layout '{path}' compresses axis {indexed_axis} of {shape}, so `indptr` holds {expected} entries -- one per slice, plus the end -- but it holds {arrays['indptr']['shape'][0]}. The declaration and the arrays disagree about what this array is.")
+        raise StoreError(
+            f"Layout '{path}' compresses axis {indexed_axis} of {shape}, so `indptr` holds {expected} entries -- one per slice, plus the end -- but it holds {arrays['indptr']['shape'][0]}. The declaration and the arrays disagree about what this array is."
+        )
 
     return LayoutReading(
         path=path,

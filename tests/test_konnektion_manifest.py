@@ -58,7 +58,9 @@ MANIFEST = {
     "files": {
         "cells": {"path": "catalog/cells.parquet", "bytes": 9124, "rowGroups": 1},
         "objects": {"path": "catalog/objects.parquet", "bytes": 2048},
-        "levels": {"0": [{"path": "level0/part-00000.parquet", "bytes": 84432, "rowGroups": 1}]},
+        "levels": {
+            "0": [{"path": "level0/part-00000.parquet", "bytes": 84432, "rowGroups": 1}]
+        },
     },
 }
 
@@ -85,13 +87,19 @@ class _FakeS3:
 
 @pytest.fixture()
 def layer(settings) -> Datalayer:
-    settings.DATALAYER = {"access_key": "k", "secret_key": "s", "konnektion": {"bucket": "networks"}}
+    settings.DATALAYER = {
+        "access_key": "k",
+        "secret_key": "s",
+        "konnektion": {"bucket": "networks"},
+    }
     return Datalayer()
 
 
 def _store() -> KonnektionStore:
     """An unsaved store row -- the manifest read touches S3, never the database."""
-    return KonnektionStore(path="s3://networks/abc123", key="abc123", bucket="konnektion")
+    return KonnektionStore(
+        path="s3://networks/abc123", key="abc123", bucket="konnektion"
+    )
 
 
 def _with_body(layer: Datalayer, body: bytes | None) -> _FakeS3:
@@ -106,10 +114,14 @@ def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Dat
 
     metadata = layer.get_konnektion_metadata(_store())
 
-    assert fake.requested == [("networks", "abc123/konnektion.json")], "the manifest sits at the root of the prefix"
+    assert fake.requested == [("networks", "abc123/konnektion.json")], (
+        "the manifest sits at the root of the prefix"
+    )
     assert metadata.spec_version == "1"
     assert metadata.grid["cellSize"] == [128, 128, 64]
-    assert metadata.encoding["edges"] == "UINT32_PAIRS", "the arity, carried through unchanged"
+    assert metadata.encoding["edges"] == "UINT32_PAIRS", (
+        "the arity, carried through unchanged"
+    )
     assert metadata.encoding["radii"] == "FLOAT32"
     assert metadata.axes == ["x", "y", "z"]
 
@@ -165,7 +177,9 @@ def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Dat
     with pytest.raises(FileNotFoundError) as excinfo:
         layer.get_konnektion_metadata(_store())
 
-    assert "uploads the manifest last" in str(excinfo.value), "the message must name the likely cause, not just the missing key"
+    assert "uploads the manifest last" in str(excinfo.value), (
+        "the message must name the likely cause, not just the missing key"
+    )
 
 
 def test_a_half_written_manifest_is_refused(layer: Datalayer):
@@ -260,7 +274,9 @@ def test_the_manifest_locates_the_catalogs_and_the_levels():
     assert manifest.cells_path == "catalog/cells.parquet"
     assert manifest.objects_path == "catalog/objects.parquet"
     assert manifest.level_paths(0) == ["level0/part-00000.parquet"]
-    assert manifest.level_paths(2) is None, "a level the manifest does not name sends a reader to the listing"
+    assert manifest.level_paths(2) is None, (
+        "a level the manifest does not name sends a reader to the listing"
+    )
 
 
 def test_a_manifest_that_names_no_files_falls_back_to_the_format_s_own_paths():
@@ -294,5 +310,10 @@ def test_a_part_path_that_leaves_the_store_is_refused(path: str):
 
 
 def test_a_written_part_path_is_accepted():
-    assert konnektion_format.cells_path_of({"cells": {"path": "catalog/cells.parquet", "bytes": 1}}) == "catalog/cells.parquet"
+    assert (
+        konnektion_format.cells_path_of(
+            {"cells": {"path": "catalog/cells.parquet", "bytes": 1}}
+        )
+        == "catalog/cells.parquet"
+    )
     assert konnektion_format.cells_path_of({}) == konnektion_format.CELL_CATALOG_PATH

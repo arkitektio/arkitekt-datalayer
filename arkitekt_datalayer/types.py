@@ -10,7 +10,10 @@ from arkitekt_datalayer.datalayer import get_current_datalayer
 from arkitekt_datalayer.scalars import ByteCount
 
 
-@kante.pydantic_type(base_models.BigFileAccessGrant, description="Temporary S3 credentials for reading a big file.")
+@kante.pydantic_type(
+    base_models.BigFileAccessGrant,
+    description="Temporary S3 credentials for reading a big file.",
+)
 class BigFileAccessGrant:
     """Temporary S3 credentials for a big file."""
 
@@ -27,7 +30,10 @@ class BigFileAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.MediaAccessGrant, description="Temporary S3 credentials for reading a media object.")
+@kante.pydantic_type(
+    base_models.MediaAccessGrant,
+    description="Temporary S3 credentials for reading a media object.",
+)
 class MediaAccessGrant:
     """Temporary S3 credentials for a media object."""
 
@@ -43,7 +49,10 @@ class MediaAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralMediaAccessGrant, description="Temporary S3 credentials for reading a media object.")
+@kante.pydantic_type(
+    base_models.GeneralMediaAccessGrant,
+    description="Temporary S3 credentials for reading a media object.",
+)
 class GeneralMediaAccessGrant:
     """Temporary S3 credentials for a media object."""
 
@@ -57,7 +66,10 @@ class GeneralMediaAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.ZarrAccessGrant, description="Temporary S3 credentials for reading a Zarr store.")
+@kante.pydantic_type(
+    base_models.ZarrAccessGrant,
+    description="Temporary S3 credentials for reading a Zarr store.",
+)
 class ZarrAccessGrant:
     """Temporary S3 credentials for a Zarr store."""
 
@@ -74,7 +86,10 @@ class ZarrAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralZarrAccessGrant, description="Temporary S3 credentials for reading a Zarr store.")
+@kante.pydantic_type(
+    base_models.GeneralZarrAccessGrant,
+    description="Temporary S3 credentials for reading a Zarr store.",
+)
 class GeneralZarrAccessGrant:
     """Temporary S3 credentials for a Zarr store."""
 
@@ -88,7 +103,10 @@ class GeneralZarrAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.GeneralParquetAccessGrant, description="Temporary S3 credentials for reading a parquet object.")
+@kante.pydantic_type(
+    base_models.GeneralParquetAccessGrant,
+    description="Temporary S3 credentials for reading a parquet object.",
+)
 class GeneralParquetAccessGrant:
     """Temporary S3 credentials for a parquet object."""
 
@@ -102,7 +120,10 @@ class GeneralParquetAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.ParquetAccessGrant, description="Temporary S3 credentials for reading a parquet object.")
+@kante.pydantic_type(
+    base_models.ParquetAccessGrant,
+    description="Temporary S3 credentials for reading a parquet object.",
+)
 class ParquetAccessGrant:
     """Temporary S3 credentials for a parquet object."""
 
@@ -118,7 +139,10 @@ class ParquetAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.SparseAccessGrant, description="Temporary S3 credentials for reading a sparse store. Covers the whole prefix, because a lookup needs `indptr` before it knows which range of `data` to fetch.")
+@kante.pydantic_type(
+    base_models.SparseAccessGrant,
+    description="Temporary S3 credentials for reading a sparse store. Covers the whole prefix, because a lookup needs `indptr` before it knows which range of `data` to fetch.",
+)
 class SparseAccessGrant:
     """Temporary S3 credentials for reading a sparse store."""
 
@@ -134,7 +158,10 @@ class SparseAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralSparseAccessGrant, description="Temporary S3 credentials for reading the organization's sparse stores.")
+@kante.pydantic_type(
+    base_models.GeneralSparseAccessGrant,
+    description="Temporary S3 credentials for reading the organization's sparse stores.",
+)
 class GeneralSparseAccessGrant:
     """Temporary S3 credentials for the organization's sparse stores."""
 
@@ -148,7 +175,10 @@ class GeneralSparseAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.SparseUploadGrant, description="Temporary S3 credentials for uploading a sparse store. Scoped to the prefix and permitted to read back and delete inside it, because the three arrays are written incrementally.")
+@kante.pydantic_type(
+    base_models.SparseUploadGrant,
+    description="Temporary S3 credentials for uploading a sparse store. Scoped to the prefix and permitted to read back and delete inside it, because the three arrays are written incrementally.",
+)
 class SparseUploadGrant:
     """Temporary S3 credentials for a sparse upload."""
 
@@ -168,7 +198,10 @@ class SparseUploadGrant:
     store: str
 
 
-@kante.pydantic_type(base_models.FabriksAccessGrant, description="Temporary S3 credentials for reading a fabriks store. Covers the whole prefix, so one grant reads the manifest, both catalogs and every level.")
+@kante.pydantic_type(
+    base_models.FabriksAccessGrant,
+    description="Temporary S3 credentials for reading a fabriks store. Covers the whole prefix, so one grant reads the manifest, both catalogs and every level.",
+)
 class FabriksAccessGrant:
     """Temporary S3 credentials for a fabriks store."""
 
@@ -184,7 +217,10 @@ class FabriksAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralFabriksAccessGrant, description="Temporary S3 credentials for reading the organization's fabriks stores.")
+@kante.pydantic_type(
+    base_models.GeneralFabriksAccessGrant,
+    description="Temporary S3 credentials for reading the organization's fabriks stores.",
+)
 class GeneralFabriksAccessGrant:
     """Temporary S3 credentials for the organization's fabriks stores."""
 
@@ -198,7 +234,10 @@ class GeneralFabriksAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.KonnektionAccessGrant, description="Temporary S3 credentials for reading a konnektion store. Covers the whole prefix, so one grant reads the manifest, both catalogs and every level.")
+@kante.pydantic_type(
+    base_models.KonnektionAccessGrant,
+    description="Temporary S3 credentials for reading a konnektion store. Covers the whole prefix, so one grant reads the manifest, both catalogs and every level.",
+)
 class KonnektionAccessGrant:
     """Temporary S3 credentials for a konnektion store."""
 
@@ -214,7 +253,10 @@ class KonnektionAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralKonnektionAccessGrant, description="Temporary S3 credentials for reading the organization's konnektion stores.")
+@kante.pydantic_type(
+    base_models.GeneralKonnektionAccessGrant,
+    description="Temporary S3 credentials for reading the organization's konnektion stores.",
+)
 class GeneralKonnektionAccessGrant:
     """Temporary S3 credentials for the organization's konnektion stores."""
 
@@ -228,7 +270,10 @@ class GeneralKonnektionAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.KonnektionUploadGrant, description="Temporary S3 credentials for uploading a konnektion store. Scoped to the prefix and permitted to read back and delete inside it, because the tree is written incrementally and its manifest lands last.")
+@kante.pydantic_type(
+    base_models.KonnektionUploadGrant,
+    description="Temporary S3 credentials for uploading a konnektion store. Scoped to the prefix and permitted to read back and delete inside it, because the tree is written incrementally and its manifest lands last.",
+)
 class KonnektionUploadGrant:
     """Temporary S3 credentials for a konnektion upload."""
 
@@ -250,7 +295,10 @@ class KonnektionUploadGrant:
 
 # Modelled on `MediaUploadGrant`, deliberately not on `ZarrUploadGrant`: that one declares an
 # `action: str` the pydantic model has never had, and omits `region`, which it does have.
-@kante.pydantic_type(base_models.FabriksUploadGrant, description="Temporary S3 credentials for uploading a fabriks store. Scoped to the prefix and permitted to read back and delete inside it, because the tree is written incrementally and its manifest lands last.")
+@kante.pydantic_type(
+    base_models.FabriksUploadGrant,
+    description="Temporary S3 credentials for uploading a fabriks store. Scoped to the prefix and permitted to read back and delete inside it, because the tree is written incrementally and its manifest lands last.",
+)
 class FabriksUploadGrant:
     """Temporary S3 credentials for a fabriks upload."""
 
@@ -270,7 +318,10 @@ class FabriksUploadGrant:
     store: str
 
 
-@kante.pydantic_type(base_models.MediaUploadGrant, description="Temporary S3 credentials for uploading a media object.")
+@kante.pydantic_type(
+    base_models.MediaUploadGrant,
+    description="Temporary S3 credentials for uploading a media object.",
+)
 class MediaUploadGrant:
     """Temporary S3 credentials for a media upload."""
 
@@ -290,7 +341,10 @@ class MediaUploadGrant:
     store: str
 
 
-@kante.pydantic_type(base_models.BigFileUploadGrant, description="Temporary S3 credentials for uploading a big file.")
+@kante.pydantic_type(
+    base_models.BigFileUploadGrant,
+    description="Temporary S3 credentials for uploading a big file.",
+)
 class BigFileUploadGrant:
     """Temporary S3 credentials for a big file upload."""
 
@@ -310,7 +364,10 @@ class BigFileUploadGrant:
     store: str
 
 
-@kante.pydantic_type(base_models.ZarrUploadGrant, description="Temporary S3 credentials for uploading a Zarr store.")
+@kante.pydantic_type(
+    base_models.ZarrUploadGrant,
+    description="Temporary S3 credentials for uploading a Zarr store.",
+)
 class ZarrUploadGrant:
     """Temporary S3 credentials for a Zarr upload."""
 
@@ -330,7 +387,10 @@ class ZarrUploadGrant:
     store: str
 
 
-@kante.pydantic_type(base_models.ParquetUploadGrant, description="Temporary S3 credentials for uploading a parquet store.")
+@kante.pydantic_type(
+    base_models.ParquetUploadGrant,
+    description="Temporary S3 credentials for uploading a parquet store.",
+)
 class ParquetUploadGrant:
     """Temporary S3 credentials for a parquet upload."""
 
@@ -361,8 +421,12 @@ class BigFileStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     original_file_name: str | None
     content_type: str | None
 
@@ -383,12 +447,18 @@ class MediaStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     original_file_name: str | None
     content_type: str | None
 
-    @kante.django_field(description="Get temporary S3 read credentials for the media object.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials for the media object."
+    )
     def access_grant(self, info: Info) -> MediaAccessGrant:
         """Return a signed read grant for the media object."""
         del info
@@ -397,21 +467,35 @@ class MediaStore:
         return MediaAccessGrant(**grant.model_dump())
 
 
-@strawberry.type(description=("One stored layout of a sparse matrix: an anndata-spelled group under `layouts/<encoding>`, holding `data`, `indices` and `indptr`. Read it with two requests -- `indptr[i:i+2]` at the position, then the range those two offsets name in `indices` and `data`."))
+@strawberry.type(
+    description=(
+        "One stored layout of a sparse matrix: an anndata-spelled group under `layouts/<encoding>`, holding `data`, `indices` and `indptr`. Read it with two requests -- `indptr[i:i+2]` at the position, then the range those two offsets name in `indices` and `data`."
+    )
+)
 class SparseLayout:
     """One stored layout of a sparse matrix, as its own group declares it."""
 
-    path: str = strawberry.field(description="Where this layout sits inside the store's prefix, e.g. `layouts/csr_matrix`. A reader opens the group at this path, not the store root")
-    encoding: str = strawberry.field(description="The anndata encoding this layout declares: `csr_matrix` or `csc_matrix`. It names which axis `indptr` indexes, which is the whole of what the two layouts differ in")
-    encoding_version: str | None = strawberry.field(description="The version of that encoding, as the layout declares it")
-    indexed_axis: int = strawberry.field(description="Which axis of the store's `shape` this layout makes contiguous. Ask along an axis no layout compresses and there is no range to read at all, only a scan of everything")
+    path: str = strawberry.field(
+        description="Where this layout sits inside the store's prefix, e.g. `layouts/csr_matrix`. A reader opens the group at this path, not the store root"
+    )
+    encoding: str = strawberry.field(
+        description="The anndata encoding this layout declares: `csr_matrix` or `csc_matrix`. It names which axis `indptr` indexes, which is the whole of what the two layouts differ in"
+    )
+    encoding_version: str | None = strawberry.field(
+        description="The version of that encoding, as the layout declares it"
+    )
+    indexed_axis: int = strawberry.field(
+        description="Which axis of the store's `shape` this layout makes contiguous. Ask along an axis no layout compresses and there is no range to read at all, only a scan of everything"
+    )
     index_order: list[int] = strawberry.field(
         description=(
             "The axes this layout did not compress, in the order `indices` was raveled over them. At rank two it has one member and says nothing; above it, unravel a returned "
             "position through this -- it is the one fact in the format that cannot be recovered from the bytes, so a wrong reading does not fail, it reads a different cell"
         )
     )
-    nnz: int = strawberry.field(description="How many nonzeros this layout holds. Read from the length of `data`, never declared")
+    nnz: int = strawberry.field(
+        description="How many nonzeros this layout holds. Read from the length of `data`, never declared"
+    )
     dtype: str = strawberry.field(description="The dtype of the stored values")
     chunks: JSON | None = strawberry.field(
         description=(
@@ -459,10 +543,18 @@ class SparseStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
-    spec: str | None = strawberry.field(description="The version of the `sporadik` block this store was accepted under. A spec selects how every byte in the prefix is read, so an unknown one is refused rather than guessed at")
-    shape: list[int] | None = strawberry.field(description="The shape of the matrix, as the root block declares it and every layout agrees. Two axes")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
+    spec: str | None = strawberry.field(
+        description="The version of the `sporadik` block this store was accepted under. A spec selects how every byte in the prefix is read, so an unknown one is refused rather than guessed at"
+    )
+    shape: list[int] | None = strawberry.field(
+        description="The shape of the matrix, as the root block declares it and every layout agrees. Two axes"
+    )
 
     @kante.django_field(
         description=(
@@ -473,9 +565,14 @@ class SparseStore:
     def layouts(self, info: Info) -> list["SparseLayout"]:
         """The layouts this store holds, rebuilt from what was read off the artifact."""
         del info
-        return [SparseLayout.of(layout) for layout in (cast(models.SparseStore, self).layouts or [])]
+        return [
+            SparseLayout.of(layout)
+            for layout in (cast(models.SparseStore, self).layouts or [])
+        ]
 
-    @kante.django_field(description="Get temporary S3 read credentials for the sparse store.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials for the sparse store."
+    )
     def access_grant(self, info: Info) -> SparseAccessGrant:
         """Return a signed read grant for the sparse store."""
         del info
@@ -484,7 +581,10 @@ class SparseStore:
         return SparseAccessGrant(**grant.model_dump())
 
 
-@kante.django_type(models.FabriksStore, description="A fabriks collection stored as a prefix of Parquet files behind the S3 datalayer. Its grid and encoding are read from its own manifest, never declared by a caller.")
+@kante.django_type(
+    models.FabriksStore,
+    description="A fabriks collection stored as a prefix of Parquet files behind the S3 datalayer. Its grid and encoding are read from its own manifest, never declared by a caller.",
+)
 class FabriksStore:
     """A fabriks store: one prefix holding a manifest, two catalogs and the level partitions."""
 
@@ -492,8 +592,12 @@ class FabriksStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     spec_version: str | None
     grid: JSON | None
     encoding: JSON | None
@@ -501,7 +605,9 @@ class FabriksStore:
     counts: JSON | None
     files: JSON | None
 
-    @kante.django_field(description="Get temporary S3 read credentials covering this store's whole prefix -- the manifest, both catalogs and every level, in one grant.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials covering this store's whole prefix -- the manifest, both catalogs and every level, in one grant."
+    )
     def access_grant(self, info: Info) -> FabriksAccessGrant:
         """Return a signed read grant for the fabriks prefix."""
         del info
@@ -510,7 +616,10 @@ class FabriksStore:
         return FabriksAccessGrant(**grant.model_dump())
 
 
-@kante.django_type(models.KonnektionStore, description="A konnektion collection stored as a prefix of Parquet files behind the S3 datalayer. Its grid and encoding are read from its own manifest, never declared by a caller.")
+@kante.django_type(
+    models.KonnektionStore,
+    description="A konnektion collection stored as a prefix of Parquet files behind the S3 datalayer. Its grid and encoding are read from its own manifest, never declared by a caller.",
+)
 class KonnektionStore:
     """A konnektion store: one prefix holding a manifest, two catalogs and the level partitions."""
 
@@ -518,8 +627,12 @@ class KonnektionStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     spec_version: str | None
     grid: JSON | None
     encoding: JSON | None
@@ -530,7 +643,9 @@ class KonnektionStore:
         description="The per-node value columns the manifest declares, each {name, encoding, semantics} -- the vocabulary a network layer's GRAPH picker entries are validated against, `radius` joining off `encoding.radii`. Null on a store filled before attributes existed, which reads the same as declaring none"
     )
 
-    @kante.django_field(description="Get temporary S3 read credentials covering this store's whole prefix -- the manifest, both catalogs and every level, in one grant.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials covering this store's whole prefix -- the manifest, both catalogs and every level, in one grant."
+    )
     def access_grant(self, info: Info) -> KonnektionAccessGrant:
         """Return a signed read grant for the konnektion prefix."""
         del info
@@ -547,11 +662,19 @@ class ZarrStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     shape: list[int]
-    chunks: list[int] = strawberry.field(description="Effective inner chunk shape — the brick/residency unit a reader can decode. For sharded arrays this is the sharding codec's inner chunk_shape, not the chunk-grid (shard) shape.")
-    shards: list[int] | None = strawberry.field(description="Shard (outer storage object) shape for zarr v3 sharding_indexed arrays; null when unsharded. Shards exist to cut object count — readers should still treat `chunks` as the brick unit.")
+    chunks: list[int] = strawberry.field(
+        description="Effective inner chunk shape — the brick/residency unit a reader can decode. For sharded arrays this is the sharding codec's inner chunk_shape, not the chunk-grid (shard) shape."
+    )
+    shards: list[int] | None = strawberry.field(
+        description="Shard (outer storage object) shape for zarr v3 sharding_indexed arrays; null when unsharded. Shards exist to cut object count — readers should still treat `chunks` as the brick unit."
+    )
     version: str | None
     dtype: str | None
     dimension_names: list[str | None] | None
@@ -561,7 +684,9 @@ class ZarrStore:
     chunk_key_encoding: JSON | None
     codecs: JSON | None
 
-    @kante.django_field(description="Get temporary S3 read credentials for the Zarr object.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials for the Zarr object."
+    )
     def access_grant(self, info: Info) -> ZarrAccessGrant:
         """Return a signed read grant for the Zarr store."""
         del info
@@ -578,12 +703,18 @@ class ParquetStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes this store actually holds, measured when its upload was finished. Null while unfinished, or for stores written before this was recorded"
+    )
     original_file_name: str | None
     content_type: str | None
 
-    @kante.django_field(description="Get temporary S3 read credentials for the parquet object.")
+    @kante.django_field(
+        description="Get temporary S3 read credentials for the parquet object."
+    )
     def access_grant(self, info: Info) -> ParquetAccessGrant:
         """Return a signed read grant for the Zarr store."""
         del info
@@ -592,7 +723,10 @@ class ParquetStore:
         return ParquetAccessGrant(**grant.model_dump())
 
 
-@kante.pydantic_type(base_models.KulisseAccessGrant, description="Temporary S3 credentials for reading a kulisse model.")
+@kante.pydantic_type(
+    base_models.KulisseAccessGrant,
+    description="Temporary S3 credentials for reading a kulisse model.",
+)
 class KulisseAccessGrant:
     """Temporary S3 credentials for a kulisse model."""
 
@@ -608,7 +742,10 @@ class KulisseAccessGrant:
     store: str | None
 
 
-@kante.pydantic_type(base_models.GeneralKulisseAccessGrant, description="Temporary S3 credentials for reading the organization's kulisse models.")
+@kante.pydantic_type(
+    base_models.GeneralKulisseAccessGrant,
+    description="Temporary S3 credentials for reading the organization's kulisse models.",
+)
 class GeneralKulisseAccessGrant:
     """Temporary S3 credentials for kulisse models."""
 
@@ -622,7 +759,10 @@ class GeneralKulisseAccessGrant:
     expires_in: int
 
 
-@kante.pydantic_type(base_models.KulisseUploadGrant, description="Temporary S3 credentials for uploading a kulisse model: one self-contained GLB, written once, then finished.")
+@kante.pydantic_type(
+    base_models.KulisseUploadGrant,
+    description="Temporary S3 credentials for uploading a kulisse model: one self-contained GLB, written once, then finished.",
+)
 class KulisseUploadGrant:
     """Temporary S3 credentials for a kulisse upload."""
 
@@ -652,7 +792,10 @@ class KulisseStats:
     animations: int
 
 
-@kante.django_type(models.KulisseStore, description="A kulisse model: a device or scene model stored as one self-contained binary glTF. Everything here is read from the file when its upload is finished, never declared by a caller.")
+@kante.django_type(
+    models.KulisseStore,
+    description="A kulisse model: a device or scene model stored as one self-contained binary glTF. Everything here is read from the file when its upload is finished, never declared by a caller.",
+)
 class KulisseStore:
     """A kulisse store: one GLB and what it says about itself."""
 
@@ -660,17 +803,37 @@ class KulisseStore:
     path: str
     bucket: str
     key: str
-    max_bytes: ByteCount | None = strawberry.field(description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this")
-    size_bytes: ByteCount | None = strawberry.field(description="How many bytes the model holds, measured when its upload was finished. Null while unfinished")
+    max_bytes: ByteCount | None = strawberry.field(
+        description="The byte budget the upload grant advertised for this store. Advertised, not enforced: a session policy bounds what a credential may write, never how much, so a store may exceed this"
+    )
+    size_bytes: ByteCount | None = strawberry.field(
+        description="How many bytes the model holds, measured when its upload was finished. Null while unfinished"
+    )
     original_file_name: str | None
-    ref: str | None = strawberry.field(description="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating it names as `forModel`")
-    spec_version: str | None = strawberry.field(description="The glTF version the model declares")
-    generator: str | None = strawberry.field(description="The tool that wrote the model, as it says")
-    bounds: JSON | None = strawberry.field(description="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates. Null when nothing declares a box")
-    nodes: list[str] | None = strawberry.field(description="The named nodes a blok can address")
-    joints: JSON | None = strawberry.field(description="The joint table (`extras.arkitekt.joints`): name, node, type, axis, limit, mimic. Empty for a rigid model")
-    extensions_used: list[str] | None = strawberry.field(description="The glTF extensions the model uses")
-    warnings: list[str] | None = strawberry.field(description="What the reader noticed but did not refuse")
+    ref: str | None = strawberry.field(
+        description="`sha256:` and the hex digest of the model's exact bytes: what a blok decorating it names as `forModel`"
+    )
+    spec_version: str | None = strawberry.field(
+        description="The glTF version the model declares"
+    )
+    generator: str | None = strawberry.field(
+        description="The tool that wrote the model, as it says"
+    )
+    bounds: JSON | None = strawberry.field(
+        description="The box the default scene occupies, `{min: [x, y, z], max: [x, y, z]}` in the model's own coordinates. Null when nothing declares a box"
+    )
+    nodes: list[str] | None = strawberry.field(
+        description="The named nodes a blok can address"
+    )
+    joints: JSON | None = strawberry.field(
+        description="The joint table (`extras.arkitekt.joints`): name, node, type, axis, limit, mimic. Empty for a rigid model"
+    )
+    extensions_used: list[str] | None = strawberry.field(
+        description="The glTF extensions the model uses"
+    )
+    warnings: list[str] | None = strawberry.field(
+        description="What the reader noticed but did not refuse"
+    )
 
     @kante.django_field(description="What the model contains, counted from its JSON.")
     def stats(self, info: Info) -> KulisseStats | None:

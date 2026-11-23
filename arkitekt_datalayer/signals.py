@@ -32,11 +32,19 @@ def _purge_after_commit(sender: type, instance: Any, **kwargs: Any) -> None:
         try:
             instance.purge_bytes()
         except Exception:
-            logger.exception("Could not delete the bytes of %s %s (%s/%s) after its row was deleted; they are now unreferenced.", type(instance).__name__, instance.pk, instance.bucket, instance.key)
+            logger.exception(
+                "Could not delete the bytes of %s %s (%s/%s) after its row was deleted; they are now unreferenced.",
+                type(instance).__name__,
+                instance.pk,
+                instance.bucket,
+                instance.key,
+            )
 
     transaction.on_commit(purge)
 
 
 def connect() -> None:
     """Connect the receiver to every store class (a polymorphic delete sends per concrete class)."""
-    post_delete.connect(_purge_after_commit, dispatch_uid="arkitekt_datalayer.purge_after_commit")
+    post_delete.connect(
+        _purge_after_commit, dispatch_uid="arkitekt_datalayer.purge_after_commit"
+    )

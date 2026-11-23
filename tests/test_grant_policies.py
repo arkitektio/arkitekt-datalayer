@@ -45,7 +45,13 @@ class _RecordingSts:
         self.calls.append(kwargs)
         if self.refuse is not None:
             raise self.refuse
-        return {"Credentials": {"AccessKeyId": "temp-key", "SecretAccessKey": "temp-secret", "SessionToken": "temp-token"}}
+        return {
+            "Credentials": {
+                "AccessKeyId": "temp-key",
+                "SecretAccessKey": "temp-secret",
+                "SessionToken": "temp-token",
+            }
+        }
 
     @property
     def policy(self) -> dict:
@@ -113,8 +119,18 @@ def test_the_prefix_buckets_are_derived_from_the_store_classes():
     assert Datalayer.prefix_bucket_keys() == {"zarr", "fabriks", "konnektion"}
 
     subclasses = DatalayerStore.__subclasses__()
-    assert {subclass.bucket_key for subclass in subclasses} == {"bigfile", "media", "zarr", "parquet", "fabriks", "konnektion", "kulisse"}, "every store type declares which bucket it belongs to"
-    assert [subclass.is_prefix for subclass in (BigFileStore, MediaStore, ParquetStore)] == [False, False, False]
+    assert {subclass.bucket_key for subclass in subclasses} == {
+        "bigfile",
+        "media",
+        "zarr",
+        "parquet",
+        "fabriks",
+        "konnektion",
+        "kulisse",
+    }, "every store type declares which bucket it belongs to"
+    assert [
+        subclass.is_prefix for subclass in (BigFileStore, MediaStore, ParquetStore)
+    ] == [False, False, False]
     assert FabriksStore.bucket_key == "fabriks" and FabriksStore.is_prefix
     assert KonnektionStore.bucket_key == "konnektion" and KonnektionStore.is_prefix
 
@@ -131,11 +147,17 @@ def test_the_prefix_buckets_are_derived_from_the_store_classes():
     by_bucket: dict[str, set[bool]] = {}
     for subclass in subclasses:
         by_bucket.setdefault(subclass.bucket_key, set()).add(subclass.is_prefix)
-    disagreeing = {bucket: kinds for bucket, kinds in by_bucket.items() if len(kinds) > 1}
-    assert not disagreeing, f"stores sharing a bucket must agree on is_prefix, but {disagreeing} do not"
+    disagreeing = {
+        bucket: kinds for bucket, kinds in by_bucket.items() if len(kinds) > 1
+    }
+    assert not disagreeing, (
+        f"stores sharing a bucket must agree on is_prefix, but {disagreeing} do not"
+    )
 
     in_zarr = {subclass for subclass in subclasses if subclass.bucket_key == "zarr"}
-    assert in_zarr == {ZarrStore, SparseStore}, "the zarr bucket holds arrays and sparse groups, both prefixes"
+    assert in_zarr == {ZarrStore, SparseStore}, (
+        "the zarr bucket holds arrays and sparse groups, both prefixes"
+    )
 
 
 def test_an_object_store_is_granted_exactly_its_own_key(layer: Datalayer):
@@ -158,7 +180,10 @@ def test_a_prefix_store_is_granted_its_whole_tree_and_may_list_it(layer: Datalay
     policy = layer._build_policy("arrays", "zarr", "abc123", "read")
     statements = _statements(policy)
 
-    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/abc123", "arn:aws:s3:::arrays/abc123/*"]
+    assert statements[0]["Resource"] == [
+        "arn:aws:s3:::arrays/abc123",
+        "arn:aws:s3:::arrays/abc123/*",
+    ]
 
     listing = statements[1]
     assert listing["Action"] == ["s3:ListBucket"]
@@ -173,27 +198,54 @@ def test_a_prefix_upload_may_read_back_and_delete_inside_its_own_tree(layer: Dat
     DeleteObject can clear. An object upload gets neither, deliberately: there is nothing to
     read back and nothing to clean up but the one key.
     """
-    prefix_upload = _statements(layer._build_policy("arrays", "zarr", "abc123", "upload"))[0]
-    assert prefix_upload["Action"] == ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+    prefix_upload = _statements(
+        layer._build_policy("arrays", "zarr", "abc123", "upload")
+    )[0]
+    assert prefix_upload["Action"] == [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+    ]
 
-    object_upload = _statements(layer._build_policy("tables", "parquet", "abc123", "upload"))[0]
-    assert object_upload["Action"] == ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+    object_upload = _statements(
+        layer._build_policy("tables", "parquet", "abc123", "upload")
+    )[0]
+    assert object_upload["Action"] == [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+    ]
 
 
-def test_a_fabriks_store_is_granted_its_whole_prefix_and_may_write_inside_it(layer: Datalayer, settings):
+def test_a_fabriks_store_is_granted_its_whole_prefix_and_may_write_inside_it(
+    layer: Datalayer, settings
+):
     """The fifth store type gets prefix treatment because of what it declares, not who it is."""
     settings.DATALAYER = {**settings.DATALAYER, "fabriks": {"bucket": "meshes"}}
     layer = Datalayer()
 
     read = _statements(layer._build_policy("meshes", "fabriks", "abc123", "read"))
-    assert read[0]["Resource"] == ["arn:aws:s3:::meshes/abc123", "arn:aws:s3:::meshes/abc123/*"]
-    assert read[1]["Action"] == ["s3:ListBucket"], "a reader globs level partitions, so it must be able to list"
+    assert read[0]["Resource"] == [
+        "arn:aws:s3:::meshes/abc123",
+        "arn:aws:s3:::meshes/abc123/*",
+    ]
+    assert read[1]["Action"] == ["s3:ListBucket"], (
+        "a reader globs level partitions, so it must be able to list"
+    )
 
-    upload = _statements(layer._build_policy("meshes", "fabriks", "abc123", "upload"))[0]
-    assert "s3:DeleteObject" in upload["Action"], "a tree written incrementally needs to clean up after a failed part"
+    upload = _statements(layer._build_policy("meshes", "fabriks", "abc123", "upload"))[
+        0
+    ]
+    assert "s3:DeleteObject" in upload["Action"], (
+        "a tree written incrementally needs to clean up after a failed part"
+    )
 
 
-def test_every_store_type_has_an_organization_wide_read_grant(layer: Datalayer, settings, sts: _RecordingSts):
+def test_every_store_type_has_an_organization_wide_read_grant(
+    layer: Datalayer, settings, sts: _RecordingSts
+):
     """`requestGeneral*Access` exists per store type, and fabriks is one of them.
 
     There is no single `requestGeneralAccess`: the grants are per logical bucket, because each
@@ -214,13 +266,17 @@ def test_every_store_type_has_an_organization_wide_read_grant(layer: Datalayer, 
     assert grant.status == "granted"
 
 
-def test_a_general_grant_refuses_a_bucket_the_deployment_has_not_configured(layer: Datalayer, settings):
+def test_a_general_grant_refuses_a_bucket_the_deployment_has_not_configured(
+    layer: Datalayer, settings
+):
     """`fabriks` is optional in the config, so asking for it unconfigured must say so.
 
     The alternative -- handing out credentials naming a bucket that does not exist -- fails
     later and further away, at whichever client tries to read through them.
     """
-    settings.DATALAYER = {key: value for key, value in settings.DATALAYER.items() if key != "fabriks"}
+    settings.DATALAYER = {
+        key: value for key, value in settings.DATALAYER.items() if key != "fabriks"
+    }
     layer = Datalayer()
 
     with pytest.raises(ValueError, match="not configured"):
@@ -233,12 +289,21 @@ def test_a_bucket_subpath_is_carried_into_the_grant(layer: Datalayer, settings):
     `config.yaml` already points media and bigfile at the same bucket. Nothing sets `subpath`
     today, which is exactly why it is worth a test before something does.
     """
-    settings.DATALAYER = {**settings.DATALAYER, "zarr": {"bucket": "arrays", "subpath": "meshes"}}
+    settings.DATALAYER = {
+        **settings.DATALAYER,
+        "zarr": {"bucket": "arrays", "subpath": "meshes"},
+    }
     layer = Datalayer()
 
     statements = _statements(layer._build_policy("arrays", "zarr", "abc123", "read"))
-    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/meshes/abc123", "arn:aws:s3:::arrays/meshes/abc123/*"]
-    assert statements[1]["Condition"]["StringLike"]["s3:prefix"] == ["meshes/abc123", "meshes/abc123/*"]
+    assert statements[0]["Resource"] == [
+        "arn:aws:s3:::arrays/meshes/abc123",
+        "arn:aws:s3:::arrays/meshes/abc123/*",
+    ]
+    assert statements[1]["Condition"]["StringLike"]["s3:prefix"] == [
+        "meshes/abc123",
+        "meshes/abc123/*",
+    ]
 
 
 def test_a_prefix_grant_asks_for_no_action_its_condition_cannot_cover(layer: Datalayer):
@@ -254,11 +319,15 @@ def test_a_prefix_grant_asks_for_no_action_its_condition_cannot_cover(layer: Dat
     two store types that carry the actual pixel data.
     """
     for bucket, bucket_key in (("arrays", "zarr"), ("tables", "parquet")):
-        for statement in _statements(layer._build_policy(bucket, bucket_key, "abc123", "read")):
+        for statement in _statements(
+            layer._build_policy(bucket, bucket_key, "abc123", "read")
+        ):
             assert "s3:GetBucketLocation" not in statement["Action"]
 
 
-def test_a_grant_that_cannot_be_scoped_fails_instead_of_handing_over_the_service_key(settings, sts: _RecordingSts):
+def test_a_grant_that_cannot_be_scoped_fails_instead_of_handing_over_the_service_key(
+    settings, sts: _RecordingSts
+):
     """The point of the whole exercise: a refused session must not become an unlimited one.
 
     Every route to credentials -- no `role_arn`, an STS that refuses, a duration STS won't
@@ -275,7 +344,9 @@ def test_a_grant_that_cannot_be_scoped_fails_instead_of_handing_over_the_service
     roleless._sts = sts
     with pytest.raises(RuntimeError, match="permanent credentials"):
         roleless._issue_temporary_credentials("zarr", "abc123", "read", 3600)
-    assert sts.calls == [], "no role means no request to make, not a request that happens to fail"
+    assert sts.calls == [], (
+        "no role means no request to make, not a request that happens to fail"
+    )
 
 
 def test_the_unscoped_fallback_is_available_but_has_to_be_asked_for(settings):
@@ -283,10 +354,16 @@ def test_the_unscoped_fallback_is_available_but_has_to_be_asked_for(settings):
     layer = _configure(settings, allow_unscoped_fallback=True)
     layer._sts = _RecordingSts(refuse=RuntimeError("Unsupported action"))
 
-    assert layer._issue_temporary_credentials("zarr", "abc123", "read", 3600) == ("key", "secret", "")
+    assert layer._issue_temporary_credentials("zarr", "abc123", "read", 3600) == (
+        "key",
+        "secret",
+        "",
+    )
 
 
-def test_a_short_lived_grant_is_floored_at_the_sts_minimum(layer: Datalayer, sts: _RecordingSts):
+def test_a_short_lived_grant_is_floored_at_the_sts_minimum(
+    layer: Datalayer, sts: _RecordingSts
+):
     """A duration STS would reject is another way into the fallback, so clamp rather than pass it on.
 
     `expires_in` is a ceiling a caller may lower, and lowering it past 900s used to buy a
@@ -296,7 +373,9 @@ def test_a_short_lived_grant_is_floored_at_the_sts_minimum(layer: Datalayer, sts
     assert sts.calls[-1]["DurationSeconds"] == MIN_SESSION_DURATION_SECONDS
 
 
-def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(layer: Datalayer, sts: _RecordingSts):
+def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(
+    layer: Datalayer, sts: _RecordingSts
+):
     """It cannot name one store, but it can name the organization: every key starts with it.
 
     A general grant once covered `bucket/*` and listed the whole bucket, which read every
@@ -304,21 +383,37 @@ def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(laye
     for objects and for the listing alike.
     """
     layer.organization_segment = lambda organization_id: f"svc/org{organization_id}"
-    layer._issue_temporary_user_access_credentials("zarr", organization_id=1, user_id=1, expires_in=3600)
+    layer._issue_temporary_user_access_credentials(
+        "zarr", organization_id=1, user_id=1, expires_in=3600
+    )
 
     statements = _statements(sts.policy)
     assert statements[0]["Action"] == ["s3:GetObject"]
-    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/svc/org1/*"], "the caller's organization, not the bucket"
-    assert statements[1]["Action"] == ["s3:ListBucket"], "a zarr reader has to be able to list chunks"
-    assert statements[1]["Condition"]["StringLike"]["s3:prefix"] == ["svc/org1/", "svc/org1/*"], "and lists only its own organization"
+    assert statements[0]["Resource"] == ["arn:aws:s3:::arrays/svc/org1/*"], (
+        "the caller's organization, not the bucket"
+    )
+    assert statements[1]["Action"] == ["s3:ListBucket"], (
+        "a zarr reader has to be able to list chunks"
+    )
+    assert statements[1]["Condition"]["StringLike"]["s3:prefix"] == [
+        "svc/org1/",
+        "svc/org1/*",
+    ], "and lists only its own organization"
 
-    layer._issue_temporary_user_access_credentials("media", organization_id=1, user_id=1, expires_in=3600)
+    layer._issue_temporary_user_access_credentials(
+        "media", organization_id=1, user_id=1, expires_in=3600
+    )
     assert len(_statements(sts.policy)) == 1, "an object bucket needs no listing"
 
 
-def test_a_general_grant_stays_inside_its_logical_buckets_subpath(layer: Datalayer, settings, sts: _RecordingSts):
+def test_a_general_grant_stays_inside_its_logical_buckets_subpath(
+    layer: Datalayer, settings, sts: _RecordingSts
+):
     """Two logical buckets sharing a physical one: a general grant for one must not read the other."""
-    settings.DATALAYER = {**settings.DATALAYER, "zarr": {"bucket": "arrays", "subpath": "meshes"}}
+    settings.DATALAYER = {
+        **settings.DATALAYER,
+        "zarr": {"bucket": "arrays", "subpath": "meshes"},
+    }
     layer = Datalayer()
     layer._sts = sts
     layer.organization_segment = lambda organization_id: f"svc/org{organization_id}"
@@ -326,7 +421,9 @@ def test_a_general_grant_stays_inside_its_logical_buckets_subpath(layer: Datalay
     grant = layer.generate_general_zarr_access_grant(organization_id=7, user_id=1)
 
     assert grant.prefix == "meshes/svc/org7"
-    assert _statements(sts.policy)[0]["Resource"] == ["arn:aws:s3:::arrays/meshes/svc/org7/*"]
+    assert _statements(sts.policy)[0]["Resource"] == [
+        "arn:aws:s3:::arrays/meshes/svc/org7/*"
+    ]
 
 
 def test_every_session_is_named_after_the_service(settings, sts: _RecordingSts):

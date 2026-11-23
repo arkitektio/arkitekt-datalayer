@@ -71,7 +71,14 @@ ENCODING_VOCABULARY: dict[str, frozenset[str]] = {
 #: The keys a decoder cannot work without, so none of them is ever defaulted on a writer's
 #: behalf. ``codec`` and ``compression`` are the load-bearing pair: a wrong guess is not an
 #: error anywhere, it is geometry that decodes to garbage.
-REQUIRED_ENCODING_KEYS = ("positions", "indices", "codec", "compression", "boundary", "decimation")
+REQUIRED_ENCODING_KEYS = (
+    "positions",
+    "indices",
+    "codec",
+    "compression",
+    "boundary",
+    "decimation",
+)
 
 _SORT_KEYS = frozenset({"MORTON"})
 _CELL_SIZE_RANK = 3
@@ -162,7 +169,9 @@ def _entry_path(raw: Any) -> str:
         return _safe_part_path(raw)
     if isinstance(raw, dict) and isinstance(raw.get("path"), str):
         return _safe_part_path(str(raw["path"]))
-    raise ManifestError(f"A file entry in a manifest is a path, or an object carrying one, got {raw!r}.")
+    raise ManifestError(
+        f"A file entry in a manifest is a path, or an object carrying one, got {raw!r}."
+    )
 
 
 #: A part path a manifest may name: relative segments of unreserved characters only. It ends up
@@ -173,46 +182,73 @@ _PART_PATH = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
 
 def _safe_part_path(path: str) -> str:
     """Refuse a part path that is not a plain relative path inside the store's prefix."""
-    if not _PART_PATH.fullmatch(path) or any(segment in (".", "..") for segment in path.split("/")):
-        raise ManifestError(f"A file entry in a manifest is a relative path of letters, digits, `.`, `_` and `-` inside the store, got {path!r}.")
+    if not _PART_PATH.fullmatch(path) or any(
+        segment in (".", "..") for segment in path.split("/")
+    ):
+        raise ManifestError(
+            f"A file entry in a manifest is a relative path of letters, digits, `.`, `_` and `-` inside the store, got {path!r}."
+        )
     return path
 
 
 def _assert_grid(grid: Any) -> dict[str, Any]:
     """Refuse a grid a reader could not address cells in."""
     if not isinstance(grid, dict):
-        raise ManifestError(f"A manifest's `grid` is an object, got {type(grid).__name__}.")
+        raise ManifestError(
+            f"A manifest's `grid` is an object, got {type(grid).__name__}."
+        )
 
     cell_size = grid.get("cellSize")
     if not isinstance(cell_size, list) or len(cell_size) != _CELL_SIZE_RANK:
-        raise ManifestError(f"`grid.cellSize` is the level-0 cell in voxels, one size per component, so it takes exactly {_CELL_SIZE_RANK} values, got {cell_size!r}.")
-    if any(not isinstance(component, int) or isinstance(component, bool) or component < 1 for component in cell_size):
-        raise ManifestError(f"`grid.cellSize` counts voxels, so every component is a whole number of at least 1, got {cell_size!r}.")
+        raise ManifestError(
+            f"`grid.cellSize` is the level-0 cell in voxels, one size per component, so it takes exactly {_CELL_SIZE_RANK} values, got {cell_size!r}."
+        )
+    if any(
+        not isinstance(component, int) or isinstance(component, bool) or component < 1
+        for component in cell_size
+    ):
+        raise ManifestError(
+            f"`grid.cellSize` counts voxels, so every component is a whole number of at least 1, got {cell_size!r}."
+        )
 
     levels = grid.get("levels")
     if not isinstance(levels, int) or isinstance(levels, bool) or levels < 1:
-        raise ManifestError(f"`grid.levels` is how many octree levels this collection stores, so it is a whole number of at least 1, got {levels!r}.")
+        raise ManifestError(
+            f"`grid.levels` is how many octree levels this collection stores, so it is a whole number of at least 1, got {levels!r}."
+        )
 
     sort_key = grid.get("sortKey", "MORTON")
     if sort_key not in _SORT_KEYS:
-        raise ManifestError(f"`grid.sortKey` is {sort_key!r}, which the format does not define. It is one of: {', '.join(sorted(_SORT_KEYS))}.")
+        raise ManifestError(
+            f"`grid.sortKey` is {sort_key!r}, which the format does not define. It is one of: {', '.join(sorted(_SORT_KEYS))}."
+        )
 
-    return {"cellSize": [int(component) for component in cell_size], "levels": int(levels), "sortKey": str(sort_key)}
+    return {
+        "cellSize": [int(component) for component in cell_size],
+        "levels": int(levels),
+        "sortKey": str(sort_key),
+    }
 
 
 def _assert_encoding(encoding: Any) -> dict[str, Any]:
     """Refuse an encoding that leaves a decoder guessing, or names a word nobody defined."""
     if not isinstance(encoding, dict):
-        raise ManifestError(f"A manifest's `encoding` is an object, got {type(encoding).__name__}.")
+        raise ManifestError(
+            f"A manifest's `encoding` is an object, got {type(encoding).__name__}."
+        )
 
     missing = [key for key in REQUIRED_ENCODING_KEYS if key not in encoding]
     if missing:
-        raise ManifestError(f"This manifest's `encoding` omits {', '.join(missing)}. A decoder cannot infer them -- a wrong guess is not an error, it is geometry that decodes to garbage -- so the collection is refused.")
+        raise ManifestError(
+            f"This manifest's `encoding` omits {', '.join(missing)}. A decoder cannot infer them -- a wrong guess is not an error, it is geometry that decodes to garbage -- so the collection is refused."
+        )
 
     for key in REQUIRED_ENCODING_KEYS:
         allowed = ENCODING_VOCABULARY[key]
         if encoding[key] not in allowed:
-            raise ManifestError(f"`encoding.{key}` is {encoding[key]!r}, which the format does not define. It is one of: {', '.join(sorted(allowed))}.")
+            raise ManifestError(
+                f"`encoding.{key}` is {encoding[key]!r}, which the format does not define. It is one of: {', '.join(sorted(allowed))}."
+            )
 
     # `normals` is optional and, in this format, usually absent: fabriks writes no normals column
     # and a renderer computes vertex normals itself. Carried through when stated so the geometry
@@ -239,7 +275,9 @@ def _assert_axes(axes: Any) -> list[str] | None:
     if axes is None:
         return None
     if isinstance(axes, str) or not isinstance(axes, list) or len(axes) != _AXIS_RANK:
-        raise ManifestError(f"A mesh collection is three-dimensional, so `axes` names {_AXIS_RANK} axes, got {axes!r}.")
+        raise ManifestError(
+            f"A mesh collection is three-dimensional, so `axes` names {_AXIS_RANK} axes, got {axes!r}."
+        )
     names = [str(axis) for axis in axes]
     if len(set(names)) != _AXIS_RANK:
         raise ManifestError(f"`axes` names each axis once, got {names!r}.")
@@ -255,17 +293,23 @@ def parse_manifest(body: bytes, *, where: str = "the manifest") -> Manifest:
     try:
         raw = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ManifestError(f"{where} is not valid JSON ({error}). It is {len(body)} bytes and starts {body[:80]!r} -- a truncated body is the other shape an interrupted write leaves behind.") from error
+        raise ManifestError(
+            f"{where} is not valid JSON ({error}). It is {len(body)} bytes and starts {body[:80]!r} -- a truncated body is the other shape an interrupted write leaves behind."
+        ) from error
 
     if not isinstance(raw, dict):
         raise ManifestError(f"{where} is a JSON object, got {type(raw).__name__}.")
 
     version = str(raw.get("specVersion", "")).strip()
     if version not in SUPPORTED_VERSIONS:
-        raise ManifestError(f"{where} declares specVersion {version!r}, which this server cannot read. Supported: {', '.join(sorted(SUPPORTED_VERSIONS))}. The version selects how every byte in the prefix is read, so an unknown one is refused rather than read as though it were familiar.")
+        raise ManifestError(
+            f"{where} declares specVersion {version!r}, which this server cannot read. Supported: {', '.join(sorted(SUPPORTED_VERSIONS))}. The version selects how every byte in the prefix is read, so an unknown one is refused rather than read as though it were familiar."
+        )
 
     if "grid" not in raw or "encoding" not in raw:
-        raise ManifestError(f"{where} must carry a `grid` and an `encoding` object: they are how a reader turns a Morton code into a box and the blobs into geometry, and nothing else in the store states them.")
+        raise ManifestError(
+            f"{where} must carry a `grid` and an `encoding` object: they are how a reader turns a Morton code into a box and the blobs into geometry, and nothing else in the store states them."
+        )
 
     counts = raw.get("counts") or {}
     files = raw.get("files") or {}

@@ -19,9 +19,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:  # noqa: ANN001 - Django's ArgumentParser
         """Declare the command's options."""
-        parser.add_argument("--days", type=int, default=1, help="Abort multipart uploads this many days after they were started.")
+        parser.add_argument(
+            "--days",
+            type=int,
+            default=1,
+            help="Abort multipart uploads this many days after they were started.",
+        )
 
     def handle(self, *args, **options) -> None:
         """Put the rule on each bucket."""
         buckets = get_current_datalayer().ensure_lifecycle(days=options["days"])
-        self.stdout.write(self.style.SUCCESS(f"abort-incomplete-multipart rule ({options['days']} day(s)) on {', '.join(buckets) or 'no buckets'}"))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"abort-incomplete-multipart rule ({options['days']} day(s)) on {', '.join(buckets) or 'no buckets'}"
+            )
+        )

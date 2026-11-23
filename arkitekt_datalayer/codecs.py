@@ -37,17 +37,23 @@ __all__ = [
 
 #: What a table's reader decodes: DuckDB-WASM. Everything Parquet defines except LZO. Both LZ4
 #: spellings are here because a footer reports ``LZ4`` for ``lz4`` and ``lz4_raw`` alike.
-TABLE_CODECS: Final[frozenset[str]] = frozenset({"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD", "BROTLI", "LZ4", "LZ4_RAW"})
+TABLE_CODECS: Final[frozenset[str]] = frozenset(
+    {"UNCOMPRESSED", "SNAPPY", "GZIP", "ZSTD", "BROTLI", "LZ4", "LZ4_RAW"}
+)
 
 #: What a collection part's reader decodes: hyparquet's two built-ins plus the ZSTD the viewer
 #: registers out of ``fzstd``. Narrow because ``hyparquet-compressors`` is not a dependency there.
 PART_CODECS: Final[frozenset[str]] = frozenset({"UNCOMPRESSED", "SNAPPY", "ZSTD"})
 
 TABLE_READER: Final[str] = "the table viewer, which reads Parquet with DuckDB-WASM"
-PART_READER: Final[str] = "the scene viewer, which reads collection parts with hyparquet and has no decoder for anything else"
+PART_READER: Final[str] = (
+    "the scene viewer, which reads collection parts with hyparquet and has no decoder for anything else"
+)
 
 
-def refuse_unreadable_codecs(found: Iterable[str], readable: Iterable[str], *, where: str, reader: str) -> None:
+def refuse_unreadable_codecs(
+    found: Iterable[str], readable: Iterable[str], *, where: str, reader: str
+) -> None:
     """Refuse a Parquet whose compression the reader downstream cannot decode.
 
     Raised at the finish of an upload, because the alternative is finding out from a view that

@@ -41,21 +41,47 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:  # noqa: ANN001 - Django's ArgumentParser
         """Declare the command's options."""
-        parser.add_argument("--dry-run", action="store_true", help="Report what would be purged without deleting anything.")
-        parser.add_argument("--older-than", type=int, default=None, metavar="DAYS", help="Grace period in days, overriding `datalayer.store_grace_days`.")
-        parser.add_argument("--limit", type=int, default=None, metavar="N", help="Purge at most N stores this run.")
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Report what would be purged without deleting anything.",
+        )
+        parser.add_argument(
+            "--older-than",
+            type=int,
+            default=None,
+            metavar="DAYS",
+            help="Grace period in days, overriding `datalayer.store_grace_days`.",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            metavar="N",
+            help="Purge at most N stores this run.",
+        )
 
     def handle(self, *args, **options) -> None:
         """Purge every eligible store, re-checking each for referrers first."""
-        grace_days = options["older_than"] if options["older_than"] is not None else load_config().store_grace_days
+        grace_days = (
+            options["older_than"]
+            if options["older_than"] is not None
+            else load_config().store_grace_days
+        )
         cutoff = timezone.now() - datetime.timedelta(days=grace_days)
         dry_run = options["dry_run"]
 
-        candidates = DatalayerStore.objects.filter(orphaned_at__isnull=False, orphaned_at__lt=cutoff).order_by("orphaned_at")
+        candidates = DatalayerStore.objects.filter(
+            orphaned_at__isnull=False, orphaned_at__lt=cutoff
+        ).order_by("orphaned_at")
         if options["limit"]:
             candidates = candidates[: options["limit"]]
 
-        abandoned = DatalayerStore.objects.filter(populated=False, upload_expires_at__isnull=False, upload_expires_at__lt=timezone.now()).order_by("upload_expires_at")
+        abandoned = DatalayerStore.objects.filter(
+            populated=False,
+            upload_expires_at__isnull=False,
+            upload_expires_at__lt=timezone.now(),
+        ).order_by("upload_expires_at")
         if options["limit"]:
             abandoned = abandoned[: options["limit"]]
 
@@ -63,7 +89,9 @@ class Command(BaseCommand):
 
         for store in abandoned:
             if dry_run:
-                self.stdout.write(f"would purge abandoned {store.bucket}/{store.key} (deadline {store.upload_expires_at:%Y-%m-%d %H:%M})")
+                self.stdout.write(
+                    f"would purge abandoned {store.bucket}/{store.key} (deadline {store.upload_expires_at:%Y-%m-%d %H:%M})"
+                )
                 purged += 1
                 continue
             outcome = self._purge(store, reason="abandoned upload")
@@ -85,7 +113,9 @@ class Command(BaseCommand):
                     revived += 1
                     continue
                 kind = "prefix" if store.is_prefix else "object"
-                self.stdout.write(f"would purge {kind} {store.bucket}/{store.key} (orphaned {store.orphaned_at:%Y-%m-%d})")
+                self.stdout.write(
+                    f"would purge {kind} {store.bucket}/{store.key} (orphaned {store.orphaned_at:%Y-%m-%d})"
+                )
                 purged += 1
                 continue
             outcome = self._purge(store, reason="orphaned")
@@ -99,9 +129,15 @@ class Command(BaseCommand):
                 objects_deleted += outcome
 
         verb = "would purge" if dry_run else "purged"
-        self.stdout.write(self.style.SUCCESS(f"{verb} {purged} store(s), {objects_deleted} object(s); kept {revived} still-referenced; {failed} failed"))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"{verb} {purged} store(s), {objects_deleted} object(s); kept {revived} still-referenced; {failed} failed"
+            )
+        )
         if not purged and not revived:
-            self.stdout.write(f"nothing orphaned longer than {grace_days} day(s), and no abandoned uploads")
+            self.stdout.write(
+                f"nothing orphaned longer than {grace_days} day(s), and no abandoned uploads"
+            )
 
     def _purge(self, store: DatalayerStore, *, reason: str) -> int | None:
         """Purge one store under a row lock: the object count, -1 if it is still referenced, None on failure."""
@@ -109,15 +145,21 @@ class Command(BaseCommand):
             with transaction.atomic():
                 # Locked on its own class, so the lock covers the subclass row data rows point
                 # at as well as the base row.
-                locked = type(store).objects.select_for_update().filter(pk=store.pk).first()
+                locked = (
+                    type(store).objects.select_for_update().filter(pk=store.pk).first()
+                )
                 if locked is None:
                     return 0
                 referrers = storage.referrers_of(locked)
                 if referrers:
                     # Re-attached, or shared with a row that outlived the deleted one. The flag
                     # was only ever a candidate marker; this is the check that makes it safe.
-                    described = ", ".join(f"{name} x{count}" for name, count in referrers)
-                    self.stdout.write(f"keep    {locked.bucket}/{locked.key} -- still referenced by {described}")
+                    described = ", ".join(
+                        f"{name} x{count}" for name, count in referrers
+                    )
+                    self.stdout.write(
+                        f"keep    {locked.bucket}/{locked.key} -- still referenced by {described}"
+                    )
                     return -1
                 # Bytes first, then the row. Bytes gone with the row left behind is retried
                 # harmlessly next run; the row gone with bytes left is a leak nothing points at.
@@ -128,5 +170,7 @@ class Command(BaseCommand):
             self.stderr.write(f"FAILED  {store.bucket}/{store.key}: {error}")
             return None
         kind = "prefix" if store.is_prefix else "object"
-        self.stdout.write(f"purged  {kind} {store.bucket}/{store.key} ({count} object{'s' if count != 1 else ''}) -- {reason}")
+        self.stdout.write(
+            f"purged  {kind} {store.bucket}/{store.key} ({count} object{'s' if count != 1 else ''}) -- {reason}"
+        )
         return count

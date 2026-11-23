@@ -321,7 +321,9 @@ class ZarrMetadata(BaseModel):
             return None
 
         chunk_shape = configuration.get("chunk_shape")
-        if not isinstance(chunk_shape, list) or not all(isinstance(item, int) for item in chunk_shape):
+        if not isinstance(chunk_shape, list) or not all(
+            isinstance(item, int) for item in chunk_shape
+        ):
             return None
 
         return cast(list[int], chunk_shape)
@@ -380,35 +382,58 @@ class ZarrMetadata(BaseModel):
             ValueError: If a sharding codec is present but the layout is unreadable.
         """
 
-        sharding_positions = [i for i, codec in enumerate(self.codecs) if isinstance(codec, dict) and codec.get("name") == "sharding_indexed"]
+        sharding_positions = [
+            i
+            for i, codec in enumerate(self.codecs)
+            if isinstance(codec, dict) and codec.get("name") == "sharding_indexed"
+        ]
         if not sharding_positions:
             return
         if sharding_positions != [0] or len(self.codecs) != 1:
-            raise ValueError(f"'sharding_indexed' must be the sole top-level codec (found it at position {sharding_positions[0]} of {len(self.codecs)}); readers reject any other layout.")
+            raise ValueError(
+                f"'sharding_indexed' must be the sole top-level codec (found it at position {sharding_positions[0]} of {len(self.codecs)}); readers reject any other layout."
+            )
 
         configuration = self._sharding_configuration()
         inner = configuration.get("chunk_shape") if configuration else None
         inner_codecs = configuration.get("codecs") if configuration else None
-        if not isinstance(inner, list) or not inner or not all(isinstance(item, int) and item > 0 for item in inner) or not isinstance(inner_codecs, list):
-            raise ValueError("Malformed 'sharding_indexed' configuration: missing or invalid chunk_shape or codecs.")
+        if (
+            not isinstance(inner, list)
+            or not inner
+            or not all(isinstance(item, int) and item > 0 for item in inner)
+            or not isinstance(inner_codecs, list)
+        ):
+            raise ValueError(
+                "Malformed 'sharding_indexed' configuration: missing or invalid chunk_shape or codecs."
+            )
 
         shard = self._chunk_grid_shape()
         if shard is None:
-            raise ValueError("Malformed zarr.json metadata: sharded array without a regular chunk grid shape.")
+            raise ValueError(
+                "Malformed zarr.json metadata: sharded array without a regular chunk grid shape."
+            )
         if len(inner) != len(shard):
-            raise ValueError(f"Sharding inner chunk rank {len(inner)} does not match the shard rank {len(shard)}.")
+            raise ValueError(
+                f"Sharding inner chunk rank {len(inner)} does not match the shard rank {len(shard)}."
+            )
         inner_sizes = [item for item in inner if isinstance(item, int)]
         for axis, (shard_size, inner_size) in enumerate(zip(shard, inner_sizes)):
             if shard_size % inner_size != 0:
-                raise ValueError(f"Shard shape {shard} is not an exact multiple of the inner chunk shape {inner} on axis {axis}.")
+                raise ValueError(
+                    f"Shard shape {shard} is not an exact multiple of the inner chunk shape {inner} on axis {axis}."
+                )
 
         for codec in inner_codecs:
             if isinstance(codec, dict) and codec.get("name") == "sharding_indexed":
-                raise ValueError("Nested 'sharding_indexed' codecs are not supported by readers.")
+                raise ValueError(
+                    "Nested 'sharding_indexed' codecs are not supported by readers."
+                )
 
         index_location = configuration.get("index_location") if configuration else None
         if index_location is not None and index_location not in ("start", "end"):
-            raise ValueError(f"Unknown sharding index_location {index_location!r}; readers only support 'start' and 'end'.")
+            raise ValueError(
+                f"Unknown sharding index_location {index_location!r}; readers only support 'start' and 'end'."
+            )
 
 
 class RequestParquetUploadInput(BaseModel):

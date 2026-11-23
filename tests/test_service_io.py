@@ -14,7 +14,13 @@ def organization(transactional_db) -> Organization:  # noqa: ANN001
 
 
 def test_stored_bytes_come_back_finished_and_measured(datalayer, organization):
-    store = datalayer.store_bytes(models.BigFileStore, organization.id, b"From: a@b\n\nhi", original_file_name="mail.eml", content_type="message/rfc822")
+    store = datalayer.store_bytes(
+        models.BigFileStore,
+        organization.id,
+        b"From: a@b\n\nhi",
+        original_file_name="mail.eml",
+        content_type="message/rfc822",
+    )
 
     store.refresh_from_db()
     assert store.populated and store.size_bytes == 13 and store.bucket == "bigfile"
@@ -46,15 +52,19 @@ def test_deleting_a_store_deletes_its_bytes_first(datalayer, organization):
 def test_a_store_row_inserted_by_raw_sql_is_unpopulated(organization):
     """takt inserts with raw SQL, which never sees a Python default."""
     with connection.cursor() as cursor:
-        cursor.execute("INSERT INTO datalayer_datalayerstore (organization_id, key, bucket) VALUES (%s, 'raw', 'media') RETURNING populated", [organization.id])
+        cursor.execute(
+            "INSERT INTO datalayer_datalayerstore (organization_id, key, bucket) VALUES (%s, 'raw', 'media') RETURNING populated",
+            [organization.id],
+        )
         assert cursor.fetchone() == (False,)
 
 
-def test_without_a_datalayer_the_app_installs_and_grants_name_what_is_missing(settings, organization):
+def test_without_a_datalayer_the_app_installs_and_grants_name_what_is_missing(
+    settings, organization
+):
     settings.DATALAYER = None
 
     assert not is_configured()
     layer = Datalayer()
     with pytest.raises(ValueError, match="`datalayer.media`"):
         layer.store_bytes(models.MediaStore, organization.id, b"x")
-

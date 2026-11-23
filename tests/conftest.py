@@ -65,14 +65,23 @@ def backend_stack() -> Iterator[Stack]:
         def db_ready() -> None:
             if "db" not in ports:
                 ports["db"] = e.get_port("db", 5432)
-            with psycopg.connect(dbname="testdb", user="test", password="test", host="localhost", port=ports["db"], connect_timeout=1) as connection:
+            with psycopg.connect(
+                dbname="testdb",
+                user="test",
+                password="test",
+                host="localhost",
+                port=ports["db"],
+                connect_timeout=1,
+            ) as connection:
                 connection.execute("SELECT 1")
 
         def rustfs_ready() -> None:
             if "rustfs" not in ports:
                 ports["rustfs"] = e.get_port("rustfs", 9000)
             try:
-                urllib.request.urlopen(f"http://localhost:{ports['rustfs']}/", timeout=1)
+                urllib.request.urlopen(
+                    f"http://localhost:{ports['rustfs']}/", timeout=1
+                )
             except urllib.error.HTTPError:
                 pass  # any S3 answer (403 to an anonymous request) means it is up
 
@@ -98,13 +107,22 @@ def django_db_setup(django_db_setup, django_db_blocker) -> Iterator[None]:  # no
 
     with django_db_blocker.unblock():
         with connections["default"].cursor() as cursor:
-            cursor.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()")
+            cursor.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
         connections.close_all()
 
 
 def root_s3(port: int):  # noqa: ANN201 - boto3 client
     """An S3 client with the root keys: what the deployment's service account holds."""
-    return boto3.client("s3", endpoint_url=f"http://localhost:{port}", aws_access_key_id=ROOT_KEY, aws_secret_access_key=ROOT_SECRET, region_name="us-east-1", config=Config(signature_version="s3v4"))
+    return boto3.client(
+        "s3",
+        endpoint_url=f"http://localhost:{port}",
+        aws_access_key_id=ROOT_KEY,
+        aws_secret_access_key=ROOT_SECRET,
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4"),
+    )
 
 
 @pytest.fixture
@@ -116,7 +134,15 @@ def datalayer(backend_stack: Stack, settings):  # noqa: ANN001, ANN201
     dl_module.GLOBAL_DL = None
     s3 = root_s3(backend_stack.rustfs_port)
     existing = {bucket["Name"] for bucket in s3.list_buckets().get("Buckets", [])}
-    for key in ("media", "bigfile", "zarr", "parquet", "fabriks", "konnektion", "kulisse"):
+    for key in (
+        "media",
+        "bigfile",
+        "zarr",
+        "parquet",
+        "fabriks",
+        "konnektion",
+        "kulisse",
+    ):
         bucket = settings.DATALAYER[key]["bucket"]
         if bucket not in existing:
             s3.create_bucket(Bucket=bucket)
@@ -125,14 +151,30 @@ def datalayer(backend_stack: Stack, settings):  # noqa: ANN001, ANN201
     dl_module.GLOBAL_DL = None
 
 
-def _context(token: str, sub: str, org_identifier: str, roles: list[str]) -> HttpContext:
-    user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
+def _context(
+    token: str, sub: str, org_identifier: str, roles: list[str]
+) -> HttpContext:
+    user, _ = User.objects.get_or_create(
+        sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"}
+    )
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
     org, _ = Organization.objects.get_or_create(identifier=org_identifier)
-    membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles})
-    request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
+    membership, _ = Membership.objects.update_or_create(
+        user=user, organization=org, defaults={"roles": roles}
+    )
+    request = UniversalRequest(
+        _extensions={"token": token},
+        _client=client,  # type: ignore[arg-type]
+        _user=user,  # type: ignore[arg-type]
+        _organization=org,  # type: ignore[arg-type]
+    )
     request.set_membership(membership)  # type: ignore[arg-type]
-    return HttpContext(request=request, response=TemporalResponse(), headers={"Authorization": f"Bearer {token}"}, type="http")
+    return HttpContext(
+        request=request,
+        response=TemporalResponse(),
+        headers={"Authorization": f"Bearer {token}"},
+        type="http",
+    )
 
 
 @pytest.fixture
@@ -163,8 +205,17 @@ def other_org_context(transactional_db) -> HttpContext:  # noqa: ANN001
 def aexecute(authenticated_context: HttpContext):  # noqa: ANN201
     """Run a GraphQL document as the editor (or ``context``); fails on GraphQL errors unless ``allow_errors``."""
 
-    async def _run(query: str, variables: dict | None = None, context: HttpContext | None = None, allow_errors: bool = False):  # noqa: ANN202
-        result = await schema.execute(query, variable_values=variables or {}, context_value=context or authenticated_context)
+    async def _run(  # noqa: ANN202
+        query: str,
+        variables: dict | None = None,
+        context: HttpContext | None = None,
+        allow_errors: bool = False,
+    ):
+        result = await schema.execute(
+            query,
+            variable_values=variables or {},
+            context_value=context or authenticated_context,
+        )
         if not allow_errors:
             assert not result.errors, result.errors
         return result
