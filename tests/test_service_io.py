@@ -3,17 +3,20 @@
 import pytest
 from authentikate.models import Organization
 from django.db import connection
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import models
 from arkitekt_datalayer.datalayer import Datalayer, is_configured
 
 
 @pytest.fixture
-def organization(transactional_db) -> Organization:  # noqa: ANN001
+def organization(transactional_db: None) -> Organization:
     return Organization.objects.create(identifier="static_issuer#static_org")
 
 
-def test_stored_bytes_come_back_finished_and_measured(datalayer, organization):
+def test_stored_bytes_come_back_finished_and_measured(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = datalayer.store_bytes(
         models.BigFileStore,
         organization.id,
@@ -29,17 +32,21 @@ def test_stored_bytes_come_back_finished_and_measured(datalayer, organization):
     assert store.measure_bytes(datalayer) == 13
 
 
-def test_a_prefix_store_is_not_one_object(datalayer, organization):
+def test_a_prefix_store_is_not_one_object(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     with pytest.raises(ValueError, match="prefix store"):
         datalayer.store_bytes(models.ZarrStore, organization.id, b"x")
 
 
-def test_reading_what_was_never_uploaded_says_so(datalayer):
+def test_reading_what_was_never_uploaded_says_so(datalayer: Datalayer) -> None:
     with pytest.raises(FileNotFoundError, match="nothing to read"):
         datalayer.read_object("bigfile", "never-uploaded")
 
 
-def test_deleting_a_store_deletes_its_bytes_first(datalayer, organization):
+def test_deleting_a_store_deletes_its_bytes_first(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = datalayer.store_bytes(models.MediaStore, organization.id, b"bye")
     key = store.key
 
@@ -49,7 +56,9 @@ def test_deleting_a_store_deletes_its_bytes_first(datalayer, organization):
         datalayer.read_object("media", key)
 
 
-def test_a_store_row_inserted_by_raw_sql_is_unpopulated(organization):
+def test_a_store_row_inserted_by_raw_sql_is_unpopulated(
+    organization: Organization,
+) -> None:
     """takt inserts with raw SQL, which never sees a Python default."""
     with connection.cursor() as cursor:
         cursor.execute(
@@ -60,8 +69,8 @@ def test_a_store_row_inserted_by_raw_sql_is_unpopulated(organization):
 
 
 def test_without_a_datalayer_the_app_installs_and_grants_name_what_is_missing(
-    settings, organization
-):
+    settings: Settings, organization: Organization
+) -> None:
     settings.DATALAYER = None
 
     assert not is_configured()

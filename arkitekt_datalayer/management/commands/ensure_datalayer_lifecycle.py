@@ -7,6 +7,8 @@ bucket rule is the backstop. Idempotent and merged by rule id, so it is safe as 
 every build, and leaves another service's rules in a shared bucket alone.
 """
 
+from typing import Any
+
 from django.core.management.base import BaseCommand
 
 from arkitekt_datalayer.datalayer import get_current_datalayer
@@ -26,7 +28,7 @@ class Command(BaseCommand):
             help="Abort multipart uploads this many days after they were started.",
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """Put the rule on each bucket."""
         buckets = get_current_datalayer().ensure_lifecycle(days=options["days"])
         self.stdout.write(

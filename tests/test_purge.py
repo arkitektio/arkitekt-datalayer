@@ -7,13 +7,15 @@ import pytest
 from authentikate.models import Organization
 from django.core.management import call_command
 from django.utils import timezone
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import models, storage
+from arkitekt_datalayer.datalayer import Datalayer
 from test_app.models import Document, Image
 
 
 @pytest.fixture
-def organization(transactional_db) -> Organization:  # noqa: ANN001
+def organization(transactional_db: None) -> Organization:
     return Organization.objects.create(identifier="static_issuer#static_org")
 
 
@@ -37,8 +39,8 @@ def _age(store: models.DatalayerStore, days: int) -> None:
 
 
 def test_deleting_a_row_flags_its_store_and_the_purge_deletes_bytes_then_row(
-    datalayer, organization
-):
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"statement")
     _delete(Document.objects.create(store=store))
     _age(store, 8)
@@ -51,7 +53,9 @@ def test_deleting_a_row_flags_its_store_and_the_purge_deletes_bytes_then_row(
         datalayer.read_object("bigfile", store.key)
 
 
-def test_a_prefix_store_is_purged_as_a_tree(datalayer, organization):
+def test_a_prefix_store_is_purged_as_a_tree(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     zarr = models.ZarrStore.objects.create(
         organization=organization, key="tree", bucket="zarr"
     )
@@ -64,7 +68,9 @@ def test_a_prefix_store_is_purged_as_a_tree(datalayer, organization):
     assert datalayer.measure_prefix_bytes("zarr", "tree") == 0
 
 
-def test_a_store_another_row_still_holds_is_kept_and_unflagged(datalayer, organization):
+def test_a_store_another_row_still_holds_is_kept_and_unflagged(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"shared")
     first = Document.objects.create(store=store)
     Document.objects.create(store=store)
@@ -77,7 +83,9 @@ def test_a_store_another_row_still_holds_is_kept_and_unflagged(datalayer, organi
     assert datalayer.read_object("bigfile", store.key) == b"shared"
 
 
-def test_an_upload_in_flight_is_never_touched(datalayer, organization):
+def test_an_upload_in_flight_is_never_touched(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     """Unreferenced is the normal state of an upload in progress: only a flag makes a store collectable."""
     store = models.MediaStore.objects.create(
         organization=organization, key="in-flight", bucket="media"
@@ -88,8 +96,8 @@ def test_an_upload_in_flight_is_never_touched(datalayer, organization):
 
 
 def test_the_grace_period_holds_and_dry_run_deletes_nothing(
-    datalayer, organization, settings
-):
+    datalayer: Datalayer, organization: Organization, settings: Settings
+) -> None:
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"recent")
     _delete(Document.objects.create(store=store))
     _age(store, 2)
@@ -101,8 +109,8 @@ def test_the_grace_period_holds_and_dry_run_deletes_nothing(
 
 
 def test_a_nullable_reference_orphans_nothing_when_it_is_already_empty(
-    datalayer, organization
-):
+    datalayer: Datalayer, organization: Organization
+) -> None:
     zarr = models.ZarrStore.objects.create(
         organization=organization, key="no-thumb", bucket="zarr"
     )
@@ -111,7 +119,9 @@ def test_a_nullable_reference_orphans_nothing_when_it_is_already_empty(
     assert [store.pk for store in storage.stores_orphaned_by(image)] == [zarr.pk]
 
 
-def test_an_abandoned_upload_is_purged_with_its_bytes(datalayer, organization):
+def test_an_abandoned_upload_is_purged_with_its_bytes(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     """Past its deadline an unfinished upload can never be finished or referenced: collect it."""
     store = models.ZarrStore.objects.create(
         organization=organization,
@@ -128,7 +138,9 @@ def test_an_abandoned_upload_is_purged_with_its_bytes(datalayer, organization):
     assert datalayer.measure_prefix_bytes("zarr", "1/abandoned") == 0
 
 
-def test_an_upload_before_its_deadline_is_left_alone(datalayer, organization):
+def test_an_upload_before_its_deadline_is_left_alone(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = models.ZarrStore.objects.create(
         organization=organization,
         key="1/running",
@@ -142,8 +154,8 @@ def test_an_upload_before_its_deadline_is_left_alone(datalayer, organization):
 
 
 def test_purging_a_store_aborts_its_unfinished_multipart_upload(
-    datalayer, organization
-):
+    datalayer: Datalayer, organization: Organization
+) -> None:
     """Parts are invisible to a listing, so a purge that only deletes objects would leave them."""
     store = models.BigFileStore.objects.create(
         organization=organization,
@@ -163,7 +175,9 @@ def test_purging_a_store_aborts_its_unfinished_multipart_upload(
     assert open_uploads == []
 
 
-def test_a_bulk_delete_takes_the_bytes_with_the_rows(datalayer, organization):
+def test_a_bulk_delete_takes_the_bytes_with_the_rows(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     """A queryset delete (the admin's bulk action, an organization's cascade) runs no model
     method, so its bytes are purged after the commit instead of being left behind."""
     store = datalayer.store_bytes(models.BigFileStore, organization.id, b"bulk")
@@ -175,8 +189,8 @@ def test_a_bulk_delete_takes_the_bytes_with_the_rows(datalayer, organization):
 
 
 def test_a_key_is_segmented_by_the_issuer_qualified_organization(
-    datalayer, organization
-):
+    datalayer: Datalayer, organization: Organization
+) -> None:
     """The segment comes from `identifier`, not the local pk: a local id names different tenants
     in different services, and services share buckets."""
     twin = Organization.objects.create(identifier="https://another-lok#static_org")

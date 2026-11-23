@@ -22,6 +22,7 @@ import io
 import json
 
 import pytest
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import konnektion as konnektion_format
 from arkitekt_datalayer.datalayer import Datalayer
@@ -86,7 +87,7 @@ class _FakeS3:
 
 
 @pytest.fixture()
-def layer(settings) -> Datalayer:
+def layer(settings: Settings) -> Datalayer:
     settings.DATALAYER = {
         "access_key": "k",
         "secret_key": "s",
@@ -108,7 +109,9 @@ def _with_body(layer: Datalayer, body: bytes | None) -> _FakeS3:
     return fake
 
 
-def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Datalayer):
+def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(
+    layer: Datalayer,
+) -> None:
     """One GET of one small object, at registration only."""
     fake = _with_body(layer, json.dumps(MANIFEST).encode())
 
@@ -126,7 +129,7 @@ def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Dat
     assert metadata.axes == ["x", "y", "z"]
 
 
-def test_declared_attributes_ride_the_whole_metadata_path(layer: Datalayer):
+def test_declared_attributes_ride_the_whole_metadata_path(layer: Datalayer) -> None:
     """The attributes reach `KonnektionMetadata`, which is what `fill_info` stores.
 
     Not redundant with the parse tests below: the first live upload after attributes landed
@@ -149,7 +152,7 @@ def test_declared_attributes_ride_the_whole_metadata_path(layer: Datalayer):
     assert layer.get_konnektion_metadata(_store()).attributes == []
 
 
-def test_a_single_level_collection_is_ordinary(layer: Datalayer):
+def test_a_single_level_collection_is_ordinary(layer: Datalayer) -> None:
     """`levels: 1` with nothing coarsened is the common case for traced data, not a defect."""
     _with_body(layer, json.dumps(MANIFEST).encode())
 
@@ -160,7 +163,7 @@ def test_a_single_level_collection_is_ordinary(layer: Datalayer):
     assert metadata.encoding["simplification"] == "NONE"
 
 
-def test_a_coarsened_collection_says_which_operations_ran(layer: Datalayer):
+def test_a_coarsened_collection_says_which_operations_ran(layer: Datalayer) -> None:
     """Two independent operations, so a level can do one and not the other."""
     _with_body(layer, json.dumps(COARSENED).encode())
 
@@ -170,7 +173,9 @@ def test_a_coarsened_collection_says_which_operations_ran(layer: Datalayer):
     assert metadata.encoding["simplification"] == "DOUGLAS_PEUCKER"
 
 
-def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Datalayer):
+def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(
+    layer: Datalayer,
+) -> None:
     """The completion marker doing its job."""
     _with_body(layer, None)
 
@@ -182,7 +187,7 @@ def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Dat
     )
 
 
-def test_a_half_written_manifest_is_refused(layer: Datalayer):
+def test_a_half_written_manifest_is_refused(layer: Datalayer) -> None:
     """A truncated JSON body is the other shape of an interrupted write."""
     _with_body(layer, json.dumps(MANIFEST).encode()[:60])
 
@@ -190,7 +195,7 @@ def test_a_half_written_manifest_is_refused(layer: Datalayer):
         layer.get_konnektion_metadata(_store())
 
 
-def test_an_unsupported_spec_version_is_refused():
+def test_an_unsupported_spec_version_is_refused() -> None:
     """The version selects how every byte is read, so an unknown one is not guessed at."""
     raw = json.loads(json.dumps(MANIFEST))
     raw["specVersion"] = "2"
@@ -199,7 +204,7 @@ def test_an_unsupported_spec_version_is_refused():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_an_encoding_missing_the_edge_arity_is_refused():
+def test_an_encoding_missing_the_edge_arity_is_refused() -> None:
     """The key whose absence is least survivable, and which nothing downstream could catch."""
     raw = json.loads(json.dumps(MANIFEST))
     del raw["encoding"]["edges"]
@@ -208,7 +213,7 @@ def test_an_encoding_missing_the_edge_arity_is_refused():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_a_triangle_arity_is_refused():
+def test_a_triangle_arity_is_refused() -> None:
     """A network collection is a segment list. Triangles belong in a fabriks store."""
     raw = json.loads(json.dumps(MANIFEST))
     raw["encoding"]["edges"] = "UINT32_TRIPLES"
@@ -217,7 +222,7 @@ def test_a_triangle_arity_is_refused():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_a_mesh_manifest_is_refused():
+def test_a_mesh_manifest_is_refused() -> None:
     """Handing this server a `fabriks.json` fails on the keys the two formats do not share."""
     mesh = {
         "specVersion": "1",
@@ -236,7 +241,7 @@ def test_a_mesh_manifest_is_refused():
         konnektion_format.parse_manifest(json.dumps(mesh).encode())
 
 
-def test_a_coarsening_word_nobody_defined_is_refused():
+def test_a_coarsening_word_nobody_defined_is_refused() -> None:
     raw = json.loads(json.dumps(MANIFEST))
     raw["encoding"]["pruning"] = "AGGRESSIVE"
 
@@ -244,7 +249,7 @@ def test_a_coarsening_word_nobody_defined_is_refused():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_a_grid_with_no_levels_is_refused():
+def test_a_grid_with_no_levels_is_refused() -> None:
     raw = json.loads(json.dumps(MANIFEST))
     raw["grid"]["levels"] = 0
 
@@ -252,7 +257,7 @@ def test_a_grid_with_no_levels_is_refused():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_axes_are_optional_but_checked_when_present():
+def test_axes_are_optional_but_checked_when_present() -> None:
     """Nothing in the format decodes through them, so absent is legitimate; malformed is not."""
     raw = json.loads(json.dumps(MANIFEST))
     del raw["axes"]
@@ -267,7 +272,7 @@ def test_axes_are_optional_but_checked_when_present():
         konnektion_format.parse_manifest(json.dumps(raw).encode())
 
 
-def test_the_manifest_locates_the_catalogs_and_the_levels():
+def test_the_manifest_locates_the_catalogs_and_the_levels() -> None:
     """A file list is a convenience for a reader that would otherwise list the prefix."""
     manifest = konnektion_format.parse_manifest(json.dumps(MANIFEST).encode())
 
@@ -279,7 +284,7 @@ def test_the_manifest_locates_the_catalogs_and_the_levels():
     )
 
 
-def test_a_manifest_that_names_no_files_falls_back_to_the_format_s_own_paths():
+def test_a_manifest_that_names_no_files_falls_back_to_the_format_s_own_paths() -> None:
     raw = json.loads(json.dumps(MANIFEST))
     del raw["files"]
     manifest = konnektion_format.parse_manifest(json.dumps(raw).encode())
@@ -302,14 +307,14 @@ ESCAPING_PATHS = [
 
 
 @pytest.mark.parametrize("path", ESCAPING_PATHS)
-def test_a_part_path_that_leaves_the_store_is_refused(path: str):
+def test_a_part_path_that_leaves_the_store_is_refused(path: str) -> None:
     with pytest.raises(konnektion_format.ManifestError, match="relative path"):
         konnektion_format.cells_path_of({"cells": {"path": path}})
     with pytest.raises(konnektion_format.ManifestError, match="relative path"):
         konnektion_format.cells_path_of({"cells": path})
 
 
-def test_a_written_part_path_is_accepted():
+def test_a_written_part_path_is_accepted() -> None:
     assert (
         konnektion_format.cells_path_of(
             {"cells": {"path": "catalog/cells.parquet", "bytes": 1}}

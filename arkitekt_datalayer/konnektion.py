@@ -198,7 +198,7 @@ def cells_path_of(files: dict[str, Any]) -> str:
     return CELL_CATALOG_PATH if declared is None else _entry_path(declared)
 
 
-def _entry_path(raw: Any) -> str:
+def _entry_path(raw: object) -> str:
     """One file entry's path, accepting the bare string a hand-written manifest may use.
 
     A konnektion-written entry is an object carrying ``bytes`` and ``rowGroups`` alongside the
@@ -232,7 +232,7 @@ def _safe_part_path(path: str) -> str:
     return path
 
 
-def _assert_grid(grid: Any) -> dict[str, Any]:
+def _assert_grid(grid: object) -> dict[str, Any]:
     """Refuse a grid a reader could not address cells in."""
     if not isinstance(grid, dict):
         raise ManifestError(
@@ -271,7 +271,7 @@ def _assert_grid(grid: Any) -> dict[str, Any]:
     }
 
 
-def _assert_encoding(encoding: Any) -> dict[str, Any]:
+def _assert_encoding(encoding: object) -> dict[str, Any]:
     """Refuse an encoding that leaves a decoder guessing, or names a word nobody defined."""
     if not isinstance(encoding, dict):
         raise ManifestError(
@@ -294,7 +294,7 @@ def _assert_encoding(encoding: Any) -> dict[str, Any]:
     return {key: str(encoding[key]) for key in REQUIRED_ENCODING_KEYS}
 
 
-def _assert_attributes(attributes: Any) -> list[dict[str, Any]]:
+def _assert_attributes(attributes: object) -> list[dict[str, Any]]:
     """Check the declared per-node attributes, and accept their absence.
 
     **Absent is legitimate** -- it is every manifest written before the key existed, and a
@@ -351,7 +351,7 @@ def _assert_attributes(attributes: Any) -> list[dict[str, Any]]:
     return parsed
 
 
-def _assert_axes(axes: Any) -> list[str] | None:
+def _assert_axes(axes: object) -> list[str] | None:
     """Check a declared axis order, and accept its absence.
 
     **Absent is legitimate.** Nothing in the format is decoded through `axes`: node position

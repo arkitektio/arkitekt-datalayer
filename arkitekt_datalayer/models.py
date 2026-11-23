@@ -1,6 +1,6 @@
 import logging
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
 from django.db import models
@@ -247,7 +247,7 @@ class DatalayerStore(PolymorphicModel):
             )
         return size
 
-    def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         """Delete the remote objects, then the row.
 
         **This purges immediately and ignores the grace period.** It is the "I mean it, now"

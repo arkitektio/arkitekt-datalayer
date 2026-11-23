@@ -19,7 +19,7 @@ from django.db.models.signals import post_delete
 logger = logging.getLogger(__name__)
 
 
-def _purge_after_commit(sender: type, instance: Any, **kwargs: Any) -> None:
+def _purge_after_commit(sender: type, instance: object, **kwargs: Any) -> None:
     from arkitekt_datalayer.models import DatalayerStore
 
     # A store is always a subclass; the base row goes as its parent, and is the same bytes.

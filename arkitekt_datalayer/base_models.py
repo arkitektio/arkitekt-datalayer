@@ -417,7 +417,9 @@ class ZarrMetadata(BaseModel):
                 f"Sharding inner chunk rank {len(inner)} does not match the shard rank {len(shard)}."
             )
         inner_sizes = [item for item in inner if isinstance(item, int)]
-        for axis, (shard_size, inner_size) in enumerate(zip(shard, inner_sizes)):
+        for axis, (shard_size, inner_size) in enumerate(
+            zip(shard, inner_sizes, strict=False)
+        ):
             if shard_size % inner_size != 0:
                 raise ValueError(
                     f"Shard shape {shard} is not an exact multiple of the inner chunk shape {inner} on axis {axis}."

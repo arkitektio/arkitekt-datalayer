@@ -15,6 +15,7 @@ intercept.
 from pathlib import Path
 
 import pytest
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import codecs
 from arkitekt_datalayer.datalayer import Datalayer
@@ -52,7 +53,9 @@ def test_the_part_set_is_the_narrow_one() -> None:
         )
 
 
-def test_the_codecs_are_read_off_a_real_footer(tmp_path: Path, settings) -> None:
+def test_the_codecs_are_read_off_a_real_footer(
+    tmp_path: Path, settings: Settings
+) -> None:
     """Written by DuckDB with GZIP, read back by DuckDB as GZIP -- no pyarrow on either side."""
     settings.DATALAYER = {
         "access_key": "k",
@@ -94,7 +97,7 @@ class _FakeDuck:
 
 
 @pytest.fixture()
-def layer(settings) -> Datalayer:
+def layer(settings: Settings) -> Datalayer:
     """A datalayer whose bucket config names the buckets the probes address."""
     settings.DATALAYER = {
         "access_key": "k",

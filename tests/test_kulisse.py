@@ -8,9 +8,13 @@ from typing import Any
 import pytest
 from authentikate.models import Organization
 from botocore.exceptions import ClientError
+from kante.context import HttpContext
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import models
+from arkitekt_datalayer.datalayer import Datalayer
 from arkitekt_datalayer.kulisse import KulissePolicy, KulisseRefused, read_model
+from tests.conftest import Execute, S3ClientFactory
 
 REQUEST = "mutation($name: String!, $size: ByteCount!) { requestKulisseUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken bucket key store maxBytes uploadContentType } }"
 FINISH = "mutation($id: String!) { finishKulisseUpload(input: {storeId: $id}) { id ref specVersion generator bounds nodes joints warnings sizeBytes stats { nodes triangles textures animations } } }"
@@ -91,7 +95,7 @@ JOINTS = {
 # --- the reader -----------------------------------------------------------------------------
 
 
-def test_a_model_is_described_from_its_header_and_json():
+def test_a_model_is_described_from_its_header_and_json() -> None:
     manifest = read(glb(*triangle(extras={"arkitekt": JOINTS})))
 
     assert (manifest.spec_version, manifest.generator) == ("2.0", "kulisse 1")
@@ -108,7 +112,7 @@ def test_a_model_is_described_from_its_header_and_json():
     )
 
 
-def test_the_box_follows_a_rotation():
+def test_the_box_follows_a_rotation() -> None:
     document, binary = triangle()
     document["nodes"][0] = {
         "name": "turret",
@@ -123,7 +127,7 @@ def test_the_box_follows_a_rotation():
     ] == [0, 1, 0]
 
 
-def test_only_the_head_and_the_json_chunk_are_read():
+def test_only_the_head_and_the_json_chunk_are_read() -> None:
     data = glb(*triangle())
     asked: list[tuple[int, int]] = []
 
@@ -146,22 +150,22 @@ def test_only_the_head_and_the_json_chunk_are_read():
         (glb({"asset": {"version": "1.0"}}), "bad_structure"),
     ],
 )
-def test_what_is_not_a_glb_2_is_refused(data: bytes, code: str):
+def test_what_is_not_a_glb_2_is_refused(data: bytes, code: str) -> None:
     assert refused(data).code == code
 
 
-def test_a_truncated_upload_is_refused():
+def test_a_truncated_upload_is_refused() -> None:
     data = glb(*triangle())
     assert refused(data[:-8], size=len(data) - 8).code == "bad_header"
 
 
-def test_a_model_carries_all_its_data():
+def test_a_model_carries_all_its_data() -> None:
     document, binary = triangle()
     document["buffers"][0]["uri"] = "elsewhere.bin"
     assert refused(glb(document, binary)).code == "external_reference"
 
 
-def test_a_broken_joint_table_is_refused():
+def test_a_broken_joint_table_is_refused() -> None:
     table = {
         "version": 1,
         "joints": [
@@ -181,7 +185,7 @@ def test_a_broken_joint_table_is_refused():
     )
 
 
-def test_the_policy_bounds_size_and_counts():
+def test_the_policy_bounds_size_and_counts() -> None:
     data = glb(*triangle())
     assert refused(data, KulissePolicy(max_size=len(data) - 1)).code == "too_large"
     assert refused(data, KulissePolicy(max_triangles=0)).code == "over_budget"
@@ -191,7 +195,7 @@ def test_the_policy_bounds_size_and_counts():
     )
 
 
-def test_unconventional_names_and_ignored_extensions_are_warnings():
+def test_unconventional_names_and_ignored_extensions_are_warnings() -> None:
     document, binary = triangle(extensionsUsed=["EXT_unknown"])
     document["nodes"][1]["name"] = "Stage X"
     warnings = read(glb(document, binary)).warnings
@@ -204,8 +208,8 @@ def test_unconventional_names_and_ignored_extensions_are_warnings():
 
 
 async def test_a_model_upload_is_read_and_described_when_it_is_finished(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     data = glb(*triangle(extras={"arkitekt": JOINTS}))
     grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data[
         "requestKulisseUpload"
@@ -245,8 +249,8 @@ async def test_a_model_upload_is_read_and_described_when_it_is_finished(
 
 
 async def test_a_file_that_is_not_a_model_fails_its_finish(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST, {"name": "notes.txt", "size": 28})).data[
         "requestKulisseUpload"
     ]
@@ -261,8 +265,8 @@ async def test_a_file_that_is_not_a_model_fails_its_finish(
 
 
 async def test_a_declared_size_over_the_policy_gets_no_grant(
-    aexecute, datalayer, settings
-):
+    aexecute: Execute, datalayer: Datalayer, settings: Settings
+) -> None:
     settings.DATALAYER = {**settings.DATALAYER, "kulisse_policy": {"max_size": 100}}
     import arkitekt_datalayer.datalayer as dl_module
 
@@ -276,8 +280,11 @@ async def test_a_declared_size_over_the_policy_gets_no_grant(
 
 
 async def test_another_organization_cannot_read_a_model(
-    aexecute, datalayer, client_s3, other_org_context
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    other_org_context: HttpContext,
+) -> None:
     data = glb(*triangle())
     grant = (await aexecute(REQUEST, {"name": "stage.glb", "size": len(data)})).data[
         "requestKulisseUpload"
@@ -297,11 +304,13 @@ async def test_another_organization_cannot_read_a_model(
 
 
 @pytest.fixture
-def organization(transactional_db) -> Organization:  # noqa: ANN001
+def organization(transactional_db: None) -> Organization:
     return Organization.objects.create(identifier="static_issuer#static_org")
 
 
-def test_a_model_the_server_writes_is_checked_too(datalayer, organization):
+def test_a_model_the_server_writes_is_checked_too(
+    datalayer: Datalayer, organization: Organization
+) -> None:
     store = datalayer.store_bytes(
         models.KulisseStore,
         organization.id,

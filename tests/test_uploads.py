@@ -2,12 +2,17 @@
 
 import datetime
 import json
+from pathlib import Path
 
 import pytest
 from botocore.exceptions import ClientError
 from django.utils import timezone
+from kante.context import HttpContext
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import models
+from arkitekt_datalayer.datalayer import Datalayer
+from tests.conftest import Execute, S3ClientFactory
 
 REQUEST_MEDIA = "mutation($name: String!, $size: ByteCount!) { requestMediaUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken bucket key store maxBytes } }"
 FINISH_MEDIA = "mutation($id: String!) { finishMediaUpload(input: {storeId: $id}) { id sizeBytes } }"
@@ -33,7 +38,9 @@ ZARR_JSON = {
 }
 
 
-async def test_a_media_upload_round_trips(aexecute, datalayer, client_s3):
+async def test_a_media_upload_round_trips(
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST_MEDIA, {"name": "cat.png", "size": 4})).data[
         "requestMediaUpload"
     ]
@@ -50,7 +57,9 @@ async def test_a_media_upload_round_trips(aexecute, datalayer, client_s3):
     assert store.read_bytes(datalayer) == b"meow"
 
 
-async def test_a_grant_writes_only_its_own_key(aexecute, datalayer, client_s3):
+async def test_a_grant_writes_only_its_own_key(
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST_MEDIA, {"name": "a.png", "size": 3})).data[
         "requestMediaUpload"
     ]
@@ -62,8 +71,8 @@ async def test_a_grant_writes_only_its_own_key(aexecute, datalayer, client_s3):
 
 
 async def test_a_read_grant_reads_its_store_and_nothing_else(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     first = await datalayer_store(datalayer, b"one")
     second = await datalayer_store(datalayer, b"two")
 
@@ -92,8 +101,8 @@ async def datalayer_store(datalayer, payload: bytes) -> models.MediaStore:  # no
 
 
 async def test_a_zarr_grant_covers_its_prefix_and_finish_reads_the_array(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST_ZARR)).data["requestZarrUpload"]
     s3 = client_s3(grant)
     prefix = grant["key"].rstrip("/")
@@ -139,8 +148,8 @@ async def test_a_zarr_grant_covers_its_prefix_and_finish_reads_the_array(
 
 
 async def test_a_parquet_finish_reads_the_columns_off_the_file(
-    aexecute, datalayer, client_s3, tmp_path
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory, tmp_path: Path
+) -> None:
     from arkitekt_datalayer.duck import DuckLayer
 
     target = tmp_path / "t.parquet"
@@ -165,8 +174,8 @@ async def test_a_parquet_finish_reads_the_columns_off_the_file(
 
 
 async def test_a_bucket_subpath_keeps_two_logical_buckets_apart(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST_FABRIKS)).data["requestFabriksUpload"]
     s3 = client_s3(grant)
 
@@ -183,8 +192,8 @@ async def test_a_bucket_subpath_keeps_two_logical_buckets_apart(
 
 
 async def test_a_role_outside_upload_roles_cannot_upload(
-    aexecute, datalayer, viewer_context
-):
+    aexecute: Execute, datalayer: Datalayer, viewer_context: HttpContext
+) -> None:
     result = await aexecute(
         REQUEST_MEDIA,
         {"name": "a.png", "size": 3},
@@ -197,8 +206,11 @@ async def test_a_role_outside_upload_roles_cannot_upload(
 
 
 async def test_another_organization_can_neither_finish_nor_read_a_store(
-    aexecute, datalayer, client_s3, other_org_context
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    other_org_context: HttpContext,
+) -> None:
     grant = (await aexecute(REQUEST_MEDIA, {"name": "a.png", "size": 3})).data[
         "requestMediaUpload"
     ]
@@ -236,8 +248,8 @@ async def _finished_zarr(aexecute, client_s3) -> str:  # noqa: ANN001
 
 
 async def test_a_finished_store_cannot_be_reopened_for_writing(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     """`valid=false` after the fact would unpopulate the store, and an unpopulated store is
     refreshable: write credentials for bytes something may already reference."""
     store = await _finished_zarr(aexecute, client_s3)
@@ -251,8 +263,8 @@ async def test_a_finished_store_cannot_be_reopened_for_writing(
 
 
 async def test_a_second_finish_returns_the_store_as_it_was_recorded(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     store = await _finished_zarr(aexecute, client_s3)
     before = await models.ZarrStore.objects.aget(id=store)
 
@@ -263,8 +275,11 @@ async def test_a_second_finish_returns_the_store_as_it_was_recorded(
 
 
 async def test_only_the_uploader_finishes_or_continues_an_upload(
-    aexecute, datalayer, client_s3, colleague_context
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    colleague_context: HttpContext,
+) -> None:
     """Same organization, different user: finish and refresh are steps of one person's upload."""
     grant = (await aexecute(REQUEST_ZARR)).data["requestZarrUpload"]
     client_s3(grant).put_object(
@@ -295,8 +310,11 @@ GENERAL_MEDIA = "mutation { requestGeneralMediaAccess(input: {}) { accessKey sec
 
 
 async def test_a_general_grant_reads_its_own_organization_and_no_other(
-    aexecute, datalayer, client_s3, other_org_context
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    other_org_context: HttpContext,
+) -> None:
     """The prefix is the organization, so a general grant is a read of one organization's stores."""
     grant = (await aexecute(REQUEST_MEDIA, {"name": "a.png", "size": 3})).data[
         "requestMediaUpload"
@@ -323,8 +341,8 @@ REFRESH_MEDIA = "mutation($id: String!) { refreshMediaUpload(input: {storeId: $i
 
 
 async def test_a_refreshed_grant_resumes_a_multipart_upload_on_the_same_key(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     """The first session starts the upload and sends a part; a refreshed one lists it and completes."""
     part = b"x" * (5 * 1024 * 1024)
     grant = (
@@ -373,8 +391,8 @@ async def test_a_refreshed_grant_resumes_a_multipart_upload_on_the_same_key(
 
 
 async def test_an_upload_cannot_be_refreshed_past_its_time(
-    aexecute, datalayer, settings
-):
+    aexecute: Execute, datalayer: Datalayer, settings: Settings
+) -> None:
     grant = (await aexecute(REQUEST_MEDIA, {"name": "a.png", "size": 3})).data[
         "requestMediaUpload"
     ]
@@ -388,8 +406,8 @@ async def test_an_upload_cannot_be_refreshed_past_its_time(
 
 
 async def test_an_abandoned_upload_can_be_neither_finished_nor_refreshed(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant = (await aexecute(REQUEST_MEDIA, {"name": "a.png", "size": 3})).data[
         "requestMediaUpload"
     ]

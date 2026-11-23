@@ -15,6 +15,7 @@ import io
 import json
 
 import pytest
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import fabriks as fabriks_format
 from arkitekt_datalayer.datalayer import Datalayer
@@ -72,7 +73,7 @@ class _FakeS3:
 
 
 @pytest.fixture()
-def layer(settings) -> Datalayer:
+def layer(settings: Settings) -> Datalayer:
     settings.DATALAYER = {
         "access_key": "k",
         "secret_key": "s",
@@ -92,7 +93,9 @@ def _with_body(layer: Datalayer, body: bytes | None) -> _FakeS3:
     return fake
 
 
-def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Datalayer):
+def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(
+    layer: Datalayer,
+) -> None:
     """One GET of one small object, at registration only -- the zarr.json move for meshes."""
     fake = _with_body(layer, json.dumps(MANIFEST).encode())
 
@@ -112,7 +115,9 @@ def test_the_manifest_is_read_from_the_prefix_and_its_facts_come_back(layer: Dat
     assert metadata.axes == ["z", "y", "x"]
 
 
-def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Datalayer):
+def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(
+    layer: Datalayer,
+) -> None:
     """The completion marker doing its job.
 
     This is the whole reason the manifest is written last. Without this refusal a killed writer
@@ -129,7 +134,7 @@ def test_a_prefix_with_no_manifest_is_refused_as_an_unfinished_upload(layer: Dat
     )
 
 
-def test_a_half_written_manifest_is_refused(layer: Datalayer):
+def test_a_half_written_manifest_is_refused(layer: Datalayer) -> None:
     """A truncated JSON body is the other shape of an interrupted write."""
     _with_body(layer, json.dumps(MANIFEST).encode()[:60])
 
@@ -137,7 +142,7 @@ def test_a_half_written_manifest_is_refused(layer: Datalayer):
         layer.get_fabriks_metadata(_store())
 
 
-def test_the_file_entries_are_read_in_both_shapes(layer: Datalayer):
+def test_the_file_entries_are_read_in_both_shapes(layer: Datalayer) -> None:
     """fabriks writes objects carrying a byte length; a hand-written manifest may write a string.
 
     The server needs only the path -- it addresses files, it never seeks inside them -- but a
@@ -166,7 +171,7 @@ def test_the_file_entries_are_read_in_both_shapes(layer: Datalayer):
     )
 
 
-def test_a_manifest_that_names_no_parts_says_so_rather_than_nothing():
+def test_a_manifest_that_names_no_parts_says_so_rather_than_nothing() -> None:
     """`None` and `[]` are different answers, and only one of them sends a reader to the listing.
 
     The manifest's file list is a claim, not authority -- a convenience for a reader that would
@@ -182,7 +187,9 @@ def test_a_manifest_that_names_no_parts_says_so_rather_than_nothing():
     )
 
 
-def test_the_vocabulary_matches_the_format_rather_than_the_servers_older_rules():
+def test_the_vocabulary_matches_the_format_rather_than_the_servers_older_rules() -> (
+    None
+):
     """Two values the earlier server rules would have refused, and the format defines both.
 
     `decimation` gained HALF/EIGHTH/CUSTOM because a writer that reduced by half and declared
@@ -216,7 +223,7 @@ def test_the_vocabulary_matches_the_format_rather_than_the_servers_older_rules()
         )
 
 
-def test_axes_are_optional_and_checked_only_when_stated():
+def test_axes_are_optional_and_checked_only_when_stated() -> None:
     """Nothing in the format decodes through `axes`, so absent is legitimate -- wrong is not."""
     without = fabriks_format.parse_manifest(
         json.dumps(
@@ -238,7 +245,7 @@ def test_axes_are_optional_and_checked_only_when_stated():
         )
 
 
-def test_an_unreadable_format_version_is_refused(layer: Datalayer):
+def test_an_unreadable_format_version_is_refused(layer: Datalayer) -> None:
     """The version selects how every byte in the prefix is read.
 
     Registering a store whose format this server does not know would mean recording a
@@ -254,7 +261,7 @@ def test_an_unreadable_format_version_is_refused(layer: Datalayer):
         layer.get_fabriks_metadata(_store())
 
 
-def test_a_manifest_missing_grid_or_encoding_is_refused(layer: Datalayer):
+def test_a_manifest_missing_grid_or_encoding_is_refused(layer: Datalayer) -> None:
     """Nothing else in the prefix states them, so a manifest without them is undecodable."""
     for dropped in ("grid", "encoding"):
         _with_body(
@@ -282,14 +289,14 @@ ESCAPING_PATHS = [
 
 
 @pytest.mark.parametrize("path", ESCAPING_PATHS)
-def test_a_part_path_that_leaves_the_store_is_refused(path: str):
+def test_a_part_path_that_leaves_the_store_is_refused(path: str) -> None:
     with pytest.raises(fabriks_format.ManifestError, match="relative path"):
         fabriks_format.cells_path_of({"cells": {"path": path}})
     with pytest.raises(fabriks_format.ManifestError, match="relative path"):
         fabriks_format.cells_path_of({"cells": path})
 
 
-def test_a_written_part_path_is_accepted():
+def test_a_written_part_path_is_accepted() -> None:
     assert (
         fabriks_format.cells_path_of(
             {"cells": {"path": "catalog/cells.parquet", "bytes": 1}}

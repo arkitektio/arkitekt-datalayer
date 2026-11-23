@@ -107,7 +107,7 @@ def resolve_quota(
     )
 
 
-def _usage(**filters) -> int:
+def _usage(**filters: object) -> int:
     """Bytes held by the stores matching ``filters``: measured if finished, declared if in flight.
 
     An in-flight upload counts only until its deadline. Past it the upload is abandoned and its

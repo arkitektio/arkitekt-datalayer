@@ -1,9 +1,13 @@
 """Quotas against measured usage: what a grant advertises and when one is refused."""
 
 import pytest
+from kante.context import HttpContext
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer import models
+from arkitekt_datalayer.datalayer import Datalayer
 from arkitekt_datalayer.quota import QuotaConfig, resolve_quota
+from tests.conftest import Execute, S3ClientFactory
 
 REQUEST_MEDIA = "mutation($name: String!, $size: ByteCount!) { requestMediaUpload(input: {originalFileName: $name, fileSize: $size}) { store maxBytes } }"
 FINISH_MEDIA = "mutation($id: String!) { finishMediaUpload(input: {storeId: $id}) { id sizeBytes } }"
@@ -29,22 +33,26 @@ async def _upload(aexecute, client_s3, payload: bytes, context=None) -> str:  # 
     return grant["store"]
 
 
-async def test_without_quotas_the_bucket_default_is_advertised(aexecute, datalayer):
+async def test_without_quotas_the_bucket_default_is_advertised(
+    aexecute: Execute, datalayer: Datalayer
+) -> None:
     """Only a prefix upload, which cannot declare a size, is advertised the bucket default."""
     grant = (await aexecute(REQUEST_ZARR)).data["requestZarrUpload"]
 
     assert grant["maxBytes"] == 100 * 1024 * 1024
 
 
-async def test_a_declared_upload_is_advertised_what_it_declared(aexecute, datalayer):
+async def test_a_declared_upload_is_advertised_what_it_declared(
+    aexecute: Execute, datalayer: Datalayer
+) -> None:
     assert (await aexecute(REQUEST_MEDIA, {"name": "f", "size": 7})).data[
         "requestMediaUpload"
     ]["maxBytes"] == 7
 
 
 async def test_the_per_upload_quota_is_advertised_and_enforced(
-    aexecute, datalayer, settings
-):
+    aexecute: Execute, datalayer: Datalayer, settings: Settings
+) -> None:
     _quotas(settings, {"default": {"max_upload_bytes": 10}})
 
     assert (await aexecute(REQUEST_ZARR)).data["requestZarrUpload"]["maxBytes"] == 10
@@ -55,8 +63,12 @@ async def test_the_per_upload_quota_is_advertised_and_enforced(
 
 
 async def test_the_user_quota_counts_what_the_user_has_stored(
-    aexecute, datalayer, client_s3, settings, other_org_context
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    settings: Settings,
+    other_org_context: HttpContext,
+) -> None:
     _quotas(settings, {"default": {"max_user_bytes": 8}})
     await _upload(aexecute, client_s3, b"12345")
 
@@ -71,8 +83,11 @@ async def test_the_user_quota_counts_what_the_user_has_stored(
 
 
 async def test_an_organization_override_beats_the_default(
-    aexecute, datalayer, client_s3, settings
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    settings: Settings,
+) -> None:
     _quotas(
         settings,
         {
@@ -86,8 +101,11 @@ async def test_an_organization_override_beats_the_default(
 
 
 async def test_an_orphaned_store_frees_its_bytes(
-    aexecute, datalayer, client_s3, settings
-):
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    settings: Settings,
+) -> None:
     from django.utils import timezone
 
     _quotas(settings, {"default": {"max_org_bytes": 8}})
@@ -103,7 +121,7 @@ async def test_an_orphaned_store_frees_its_bytes(
     assert not (await aexecute(REQUEST_MEDIA, {"name": "f", "size": 1})).errors
 
 
-def test_resolution_is_most_specific_first():
+def test_resolution_is_most_specific_first() -> None:
     config = QuotaConfig.model_validate(
         {
             "default": {
@@ -134,8 +152,8 @@ def test_resolution_is_most_specific_first():
 
 
 async def test_an_upload_in_flight_reserves_what_it_declared(
-    aexecute, datalayer, settings
-):
+    aexecute: Execute, datalayer: Datalayer, settings: Settings
+) -> None:
     """Never finishing must not be a way around the quota: the declared size counts from the grant."""
     _quotas(settings, {"default": {"max_user_bytes": 10}})
     await aexecute(REQUEST_MEDIA, {"name": "f", "size": 8})
@@ -145,8 +163,8 @@ async def test_an_upload_in_flight_reserves_what_it_declared(
 
 
 async def test_an_object_larger_than_declared_is_refused_and_deleted(
-    aexecute, datalayer, client_s3
-):
+    aexecute: Execute, datalayer: Datalayer, client_s3: S3ClientFactory
+) -> None:
     grant_query = "mutation($name: String!, $size: ByteCount!) { requestMediaUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken bucket key store } }"
     grant = (await aexecute(grant_query, {"name": "f", "size": 2})).data[
         "requestMediaUpload"
@@ -164,7 +182,9 @@ async def test_an_object_larger_than_declared_is_refused_and_deleted(
         datalayer.read_object("media", store.key)
 
 
-async def test_a_finish_with_nothing_uploaded_is_refused(aexecute, datalayer):
+async def test_a_finish_with_nothing_uploaded_is_refused(
+    aexecute: Execute, datalayer: Datalayer
+) -> None:
     store = (await aexecute(REQUEST_MEDIA, {"name": "f", "size": 3})).data[
         "requestMediaUpload"
     ]["store"]

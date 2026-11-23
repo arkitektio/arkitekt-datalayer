@@ -11,9 +11,10 @@
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
 import boto3
 import psycopg
@@ -22,8 +23,12 @@ from authentikate.models import Client, Membership, Organization, User
 from botocore.config import Config
 from dokker import testing
 from kante.context import HttpContext, UniversalRequest
+from pytest_django import DjangoDbBlocker
+from pytest_django.fixtures import Settings
 from strawberry.http.temporal_response import TemporalResponse
+from strawberry.types import ExecutionResult
 
+from arkitekt_datalayer.datalayer import Datalayer
 from test_project.schema import schema
 
 ROOT_KEY = "datalayerroot"
@@ -44,9 +49,9 @@ def _wait(check: Callable[[], None], what: str, timeout: float = 60) -> None:
         try:
             check()
             return
-        except Exception:
+        except Exception as error:
             if time.monotonic() >= deadline:
-                raise RuntimeError(f"{what} did not come up in {timeout}s")
+                raise RuntimeError(f"{what} did not come up in {timeout}s") from error
             time.sleep(0.2)
 
 
@@ -100,7 +105,9 @@ def django_db_modify_db_settings(backend_stack: Stack) -> Iterator[None]:
 
 
 @pytest.fixture(scope="session")
-def django_db_setup(django_db_setup, django_db_blocker) -> Iterator[None]:  # noqa: ANN001
+def django_db_setup(
+    django_db_setup: None, django_db_blocker: DjangoDbBlocker
+) -> Iterator[None]:
     """Kill asgiref's executor-thread connections before the test database is dropped."""
     yield
     from django.db import connections
@@ -126,7 +133,7 @@ def root_s3(port: int):  # noqa: ANN201 - boto3 client
 
 
 @pytest.fixture
-def datalayer(backend_stack: Stack, settings):  # noqa: ANN001, ANN201
+def datalayer(backend_stack: Stack, settings: Settings) -> Iterator[Datalayer]:
     """The datalayer pointed at the stack's RustFS, with every configured bucket created."""
     import arkitekt_datalayer.datalayer as dl_module
 
@@ -178,39 +185,55 @@ def _context(
 
 
 @pytest.fixture
-def authenticated_context(transactional_db) -> HttpContext:  # noqa: ANN001
+def authenticated_context(transactional_db: None) -> HttpContext:
     """An editor of ``static_org``: may upload."""
     return _context("test", "1", "static_issuer#static_org", ["editor"])
 
 
 @pytest.fixture
-def colleague_context(transactional_db) -> HttpContext:  # noqa: ANN001
+def colleague_context(transactional_db: None) -> HttpContext:
     """Another editor of ``static_org``: may upload, but not finish someone else's upload."""
     return _context("colleague", "3", "static_issuer#static_org", ["editor"])
 
 
 @pytest.fixture
-def viewer_context(transactional_db) -> HttpContext:  # noqa: ANN001
+def viewer_context(transactional_db: None) -> HttpContext:
     """A viewer of ``static_org``: holds no upload role."""
     return _context("viewer", "2", "static_issuer#static_org", ["viewer"])
 
 
 @pytest.fixture
-def other_org_context(transactional_db) -> HttpContext:  # noqa: ANN001
+def other_org_context(transactional_db: None) -> HttpContext:
     """An editor of ``other_org``."""
     return _context("othertest", "9", "static_issuer#other_org", ["editor"])
 
 
-@pytest.fixture
-def aexecute(authenticated_context: HttpContext):  # noqa: ANN201
-    """Run a GraphQL document as the editor (or ``context``); fails on GraphQL errors unless ``allow_errors``."""
+#: Builds an S3 client from a grant's credentials; boto3's clients are untyped.
+S3ClientFactory = Callable[[dict[str, str]], Any]
 
-    async def _run(  # noqa: ANN202
+
+class Execute(Protocol):
+    """Run a GraphQL document, as the ``aexecute`` fixture does."""
+
+    def __call__(
+        self,
         query: str,
-        variables: dict | None = None,
+        variables: dict[str, object] | None = None,
         context: HttpContext | None = None,
         allow_errors: bool = False,
-    ):
+    ) -> Awaitable[ExecutionResult]: ...
+
+
+@pytest.fixture
+def aexecute(authenticated_context: HttpContext) -> Execute:
+    """Run a GraphQL document as the editor (or ``context``); fails on GraphQL errors unless ``allow_errors``."""
+
+    async def _run(
+        query: str,
+        variables: dict[str, object] | None = None,
+        context: HttpContext | None = None,
+        allow_errors: bool = False,
+    ) -> ExecutionResult:
         result = await schema.execute(
             query,
             variable_values=variables or {},
@@ -224,10 +247,10 @@ def aexecute(authenticated_context: HttpContext):  # noqa: ANN201
 
 
 @pytest.fixture
-def client_s3(backend_stack: Stack):  # noqa: ANN201
+def client_s3(backend_stack: Stack) -> S3ClientFactory:
     """Build an S3 client from a grant's temporary credentials, the way a client does."""
 
-    def _client(grant: dict):  # noqa: ANN202
+    def _client(grant: dict[str, str]) -> Any:  # noqa: ANN401 -- boto3's clients are untyped
         return boto3.client(
             "s3",
             endpoint_url=f"http://localhost:{backend_stack.rustfs_port}",

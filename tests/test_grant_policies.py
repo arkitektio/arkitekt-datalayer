@@ -16,6 +16,7 @@ contents where the bug it guards is a call that succeeded and deleted nothing.
 import json
 
 import pytest
+from pytest_django.fixtures import Settings
 
 from arkitekt_datalayer.datalayer import MIN_SESSION_DURATION_SECONDS, Datalayer
 from arkitekt_datalayer.models import (
@@ -59,7 +60,7 @@ class _RecordingSts:
         return json.loads(self.calls[-1]["Policy"])  # type: ignore[arg-type]
 
 
-def _configure(settings, **overrides: object) -> Datalayer:
+def _configure(settings: Settings, **overrides: object) -> Datalayer:
     """Build a datalayer with every logical bucket configured, pointing nowhere in particular.
 
     Replaces ``settings.DATALAYER`` wholesale rather than merging into it, and must keep doing
@@ -91,7 +92,7 @@ def sts() -> _RecordingSts:
 
 
 @pytest.fixture()
-def layer(settings, sts: _RecordingSts) -> Datalayer:
+def layer(settings: Settings, sts: _RecordingSts) -> Datalayer:
     """A datalayer with every logical bucket configured and a stubbed STS."""
     instance = _configure(settings)
     instance._sts = sts
@@ -102,7 +103,7 @@ def _statements(policy: dict) -> list[dict]:
     return policy["Statement"]  # type: ignore[return-value]
 
 
-def test_the_prefix_buckets_are_derived_from_the_store_classes():
+def test_the_prefix_buckets_are_derived_from_the_store_classes() -> None:
     """The set is a consequence of the models, not a literal anyone has to remember.
 
     `FabriksStore` is the evidence rather than the example: it joined this set by declaring
@@ -160,7 +161,7 @@ def test_the_prefix_buckets_are_derived_from_the_store_classes():
     )
 
 
-def test_an_object_store_is_granted_exactly_its_own_key(layer: Datalayer):
+def test_an_object_store_is_granted_exactly_its_own_key(layer: Datalayer) -> None:
     """One object, one resource, and no bucket listing -- a parquet is a single file."""
     policy = layer._build_policy("tables", "parquet", "abc123", "read")
     statements = _statements(policy)
@@ -170,7 +171,9 @@ def test_an_object_store_is_granted_exactly_its_own_key(layer: Datalayer):
     assert statements[0]["Action"] == ["s3:GetObject"]
 
 
-def test_a_prefix_store_is_granted_its_whole_tree_and_may_list_it(layer: Datalayer):
+def test_a_prefix_store_is_granted_its_whole_tree_and_may_list_it(
+    layer: Datalayer,
+) -> None:
     """A zarr is a directory: the grant must cover the children and permit listing them.
 
     Without the `/*` resource a reader can fetch `zarr.json` and not one chunk; without the
@@ -191,7 +194,9 @@ def test_a_prefix_store_is_granted_its_whole_tree_and_may_list_it(layer: Datalay
     assert listing["Condition"]["StringLike"]["s3:prefix"] == ["abc123", "abc123/*"]
 
 
-def test_a_prefix_upload_may_read_back_and_delete_inside_its_own_tree(layer: Datalayer):
+def test_a_prefix_upload_may_read_back_and_delete_inside_its_own_tree(
+    layer: Datalayer,
+) -> None:
     """A tree is written incrementally, so the writer needs more than PutObject.
 
     It reads back and rewrites objects as it goes, and a failed multipart leaves garbage only
@@ -220,8 +225,8 @@ def test_a_prefix_upload_may_read_back_and_delete_inside_its_own_tree(layer: Dat
 
 
 def test_a_fabriks_store_is_granted_its_whole_prefix_and_may_write_inside_it(
-    layer: Datalayer, settings
-):
+    layer: Datalayer, settings: Settings
+) -> None:
     """The fifth store type gets prefix treatment because of what it declares, not who it is."""
     settings.DATALAYER = {**settings.DATALAYER, "fabriks": {"bucket": "meshes"}}
     layer = Datalayer()
@@ -244,8 +249,8 @@ def test_a_fabriks_store_is_granted_its_whole_prefix_and_may_write_inside_it(
 
 
 def test_every_store_type_has_an_organization_wide_read_grant(
-    layer: Datalayer, settings, sts: _RecordingSts
-):
+    layer: Datalayer, settings: Settings, sts: _RecordingSts
+) -> None:
     """`requestGeneral*Access` exists per store type, and fabriks is one of them.
 
     There is no single `requestGeneralAccess`: the grants are per logical bucket, because each
@@ -267,8 +272,8 @@ def test_every_store_type_has_an_organization_wide_read_grant(
 
 
 def test_a_general_grant_refuses_a_bucket_the_deployment_has_not_configured(
-    layer: Datalayer, settings
-):
+    layer: Datalayer, settings: Settings
+) -> None:
     """`fabriks` is optional in the config, so asking for it unconfigured must say so.
 
     The alternative -- handing out credentials naming a bucket that does not exist -- fails
@@ -283,7 +288,9 @@ def test_a_general_grant_refuses_a_bucket_the_deployment_has_not_configured(
         layer.generate_general_fabriks_access_grant(organization_id="1", user_id="1")
 
 
-def test_a_bucket_subpath_is_carried_into_the_grant(layer: Datalayer, settings):
+def test_a_bucket_subpath_is_carried_into_the_grant(
+    layer: Datalayer, settings: Settings
+) -> None:
     """Two logical buckets can share a physical one, so the subpath must reach the resource.
 
     `config.yaml` already points media and bigfile at the same bucket. Nothing sets `subpath`
@@ -306,7 +313,9 @@ def test_a_bucket_subpath_is_carried_into_the_grant(layer: Datalayer, settings):
     ]
 
 
-def test_a_prefix_grant_asks_for_no_action_its_condition_cannot_cover(layer: Datalayer):
+def test_a_prefix_grant_asks_for_no_action_its_condition_cannot_cover(
+    layer: Datalayer,
+) -> None:
     """The listing statement carries an `s3:prefix` condition, so every action under it must accept one.
 
     MinIO validates the inline policy when the role is assumed and rejects the *whole document*
@@ -326,8 +335,8 @@ def test_a_prefix_grant_asks_for_no_action_its_condition_cannot_cover(layer: Dat
 
 
 def test_a_grant_that_cannot_be_scoped_fails_instead_of_handing_over_the_service_key(
-    settings, sts: _RecordingSts
-):
+    settings: Settings, sts: _RecordingSts
+) -> None:
     """The point of the whole exercise: a refused session must not become an unlimited one.
 
     Every route to credentials -- no `role_arn`, an STS that refuses, a duration STS won't
@@ -349,7 +358,9 @@ def test_a_grant_that_cannot_be_scoped_fails_instead_of_handing_over_the_service
     )
 
 
-def test_the_unscoped_fallback_is_available_but_has_to_be_asked_for(settings):
+def test_the_unscoped_fallback_is_available_but_has_to_be_asked_for(
+    settings: Settings,
+) -> None:
     """Development still needs to run without a working STS -- explicitly, and only then."""
     layer = _configure(settings, allow_unscoped_fallback=True)
     layer._sts = _RecordingSts(refuse=RuntimeError("Unsupported action"))
@@ -363,7 +374,7 @@ def test_the_unscoped_fallback_is_available_but_has_to_be_asked_for(settings):
 
 def test_a_short_lived_grant_is_floored_at_the_sts_minimum(
     layer: Datalayer, sts: _RecordingSts
-):
+) -> None:
     """A duration STS would reject is another way into the fallback, so clamp rather than pass it on.
 
     `expires_in` is a ceiling a caller may lower, and lowering it past 900s used to buy a
@@ -375,7 +386,7 @@ def test_a_short_lived_grant_is_floored_at_the_sts_minimum(
 
 def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(
     layer: Datalayer, sts: _RecordingSts
-):
+) -> None:
     """It cannot name one store, but it can name the organization: every key starts with it.
 
     A general grant once covered `bucket/*` and listed the whole bucket, which read every
@@ -407,8 +418,8 @@ def test_a_general_grant_is_read_only_and_stops_at_the_callers_organization(
 
 
 def test_a_general_grant_stays_inside_its_logical_buckets_subpath(
-    layer: Datalayer, settings, sts: _RecordingSts
-):
+    layer: Datalayer, settings: Settings, sts: _RecordingSts
+) -> None:
     """Two logical buckets sharing a physical one: a general grant for one must not read the other."""
     settings.DATALAYER = {
         **settings.DATALAYER,
@@ -426,7 +437,9 @@ def test_a_general_grant_stays_inside_its_logical_buckets_subpath(
     ]
 
 
-def test_every_session_is_named_after_the_service(settings, sts: _RecordingSts):
+def test_every_session_is_named_after_the_service(
+    settings: Settings, sts: _RecordingSts
+) -> None:
     layer = _configure(settings, session_name="mikro")
     layer._sts = sts
 

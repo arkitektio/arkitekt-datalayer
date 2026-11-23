@@ -24,6 +24,7 @@ Run it from cron. Nothing is freed until it runs.
 """
 
 import datetime
+from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.db import models, transaction
@@ -61,7 +62,7 @@ class Command(BaseCommand):
             help="Purge at most N stores this run.",
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         """Purge every eligible store, re-checking each for referrers first."""
         grace_days = (
             options["older_than"]
