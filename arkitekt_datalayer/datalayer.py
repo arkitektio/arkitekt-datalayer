@@ -20,6 +20,7 @@ from arkitekt_datalayer import konnektion as konnektion_format
 from arkitekt_datalayer import kulisse as kulisse_format
 from arkitekt_datalayer import quota as quota_module
 from arkitekt_datalayer.configuration import KulissePolicySettings
+from arkitekt_datalayer.digest import CompositeHasher, part_size_for
 
 if TYPE_CHECKING:
     from authentikate.models import User
@@ -1288,6 +1289,9 @@ class Datalayer:
             upload_file_name=store.get_upload_file_name(),
             upload_content_type=store.content_type,
             store=str(store.pk),
+            # From the declared size: the client's parts must be cut where the digest's are,
+            # and the declared size is the one both sides know before a byte is sent.
+            part_size=part_size_for(store.declared_bytes or 0),
         )
 
     def _build_sparse_upload_grant(
@@ -2476,6 +2480,49 @@ class Datalayer:
         for chunk in body.iter_chunks(chunk_size=1024 * 1024):
             digest.update(chunk)
         return "sha256:" + digest.hexdigest()
+
+    def object_checksum(
+        self, bucket_key: str, object_path: str
+    ) -> tuple[str | None, int]:
+        """The SHA-256 checksum the object store verified when the object was written, if any, and its size.
+
+        Only SHA-256 is read: an SDK that checksummed with CRC32 or CRC64 by default says
+        nothing about the digest, and the object is hashed instead.
+
+        Raises:
+            FileNotFoundError: If there is no object at the key.
+        """
+        conf = self.get_bucket_config(bucket_key)
+        key = self.build_object_key(bucket_key, object_path)
+        try:
+            head = self._s3.head_object(
+                Bucket=conf.bucket, Key=key, ChecksumMode="ENABLED"
+            )
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"No object at s3://{conf.bucket}/{key}, so it has no checksum."
+            ) from exc
+        return head.get("ChecksumSHA256"), head["ContentLength"]
+
+    def object_digest(self, bucket_key: str, object_path: str, size: int) -> str:
+        """The digest (:mod:`arkitekt_datalayer.digest`) of an object of ``size`` bytes, streamed once in constant memory.
+
+        Raises:
+            FileNotFoundError: If there is no object at the key.
+            ValueError: If the object is not ``size`` bytes.
+        """
+        conf = self.get_bucket_config(bucket_key)
+        key = self.build_object_key(bucket_key, object_path)
+        try:
+            body = self._s3.get_object(Bucket=conf.bucket, Key=key)["Body"]
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"No object at s3://{conf.bucket}/{key}, so there is nothing to hash."
+            ) from exc
+        hasher = CompositeHasher(size)
+        for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+            hasher.update(chunk)
+        return hasher.hexdigest()
 
     def store_bytes(
         self,

@@ -579,6 +579,13 @@ class KulisseUploadGrant(BaseUploadGrant):
 class BigFileUploadGrant(BaseUploadGrant):
     """Temporary S3 credentials for a big file upload."""
 
+    #: The part size the store's digest is cut at (``digest.part_size_for`` the declared size).
+    #: An upload in parts of this size with SHA-256 checksums -- one request when it fits in
+    #: one part -- has its digest verified by the object store and is not read again.
+    part_size: int
+    #: The checksum algorithm to send with every part: ``SHA256``.
+    checksum_algorithm: str = "SHA256"
+
 
 class ZarrUploadGrant(BaseUploadGrant):
     """Temporary S3 credentials for a Zarr upload."""

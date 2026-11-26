@@ -362,6 +362,12 @@ class BigFileUploadGrant:
     upload_file_name: str
     upload_content_type: str | None
     store: str
+    part_size: ByteCount = strawberry.field(
+        description="Upload in parts of this size (one request when the file fits in one), each with a `checksumAlgorithm` checksum: the object store then verifies the file's digest as it arrives, and it is not read again"
+    )
+    checksum_algorithm: str = strawberry.field(
+        description="The checksum to send with every part: `SHA256`"
+    )
 
 
 @kante.pydantic_type(
@@ -429,6 +435,15 @@ class BigFileStore:
     )
     original_file_name: str | None
     content_type: str | None
+    digest: str | None = strawberry.field(
+        description="What the bytes are: the hex SHA-256 composite over parts cut at a size that follows from the file's size (`digestAlgorithm`). Two files with the same digest and size hold the same bytes. Null while it is owed"
+    )
+    digest_algorithm: str | None = strawberry.field(
+        description="How `digest` was computed: `sha256-composite`"
+    )
+    sample: str | None = strawberry.field(
+        description="A fingerprint of the size and three windows of the file: what a client computes before uploading, to ask whether the file may already be stored. A candidate, not a proof"
+    )
 
     @strawberry.field(description="Get temporary S3 read credentials for the object.")
     def access_grant(self, info: Info) -> BigFileAccessGrant:

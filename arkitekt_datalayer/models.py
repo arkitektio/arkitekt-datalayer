@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.conf import settings
 from django.db import models
 from django.db.models.functions import Now
+from django.utils import timezone
 from polymorphic.models import PolymorphicModel
 
 from arkitekt_datalayer import base_models, sporadik
+from arkitekt_datalayer import digest as digests
 from arkitekt_datalayer import fabriks as fabriks_format
 from arkitekt_datalayer import konnektion as konnektion_format
 from arkitekt_datalayer.datalayer import AccessGrant, Datalayer
@@ -296,9 +298,99 @@ class BigFileStore(DatalayerStore):
 
     bucket_key: ClassVar[str] = "bigfile"
 
+    #: An object no larger than this is hashed whole when its upload is finished, if the
+    #: object store did not already vouch for its digest. A larger one is owed to
+    #: ``digest_bigfiles``: finishing an upload should not read gigabytes.
+    inline_digest_bytes: ClassVar[int] = 64 * 1024 * 1024
+
+    # Every column nullable: rows are also inserted by raw SQL (rekuest's takt), and a store
+    # without a digest is one not hashed yet, not a broken one.
+    digest = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "What the bytes are: the hex SHA-256 composite over parts cut at `digest.part_size_for(size)` (`digest_algorithm`). Two stores with the same digest and "
+            "size hold the same bytes. Null while owed: read off the object store's own verified checksum when the upload used the advertised parts, hashed here otherwise"
+        ),
+    )
+    digest_algorithm = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="How `digest` was computed (`sha256-composite`), so that a later definition can sit beside this one",
+    )
+    sample = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "A fingerprint of the size and three windows of the object (`digest.sample_of`), read here: what a client computes before uploading, to ask whether "
+            "the file may already be stored. A candidate, not a proof -- the digest settles it"
+        ),
+    )
+    digested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When `digest` was recorded. Null while it is owed",
+    )
+
     def grant_read_access(self, datalayer: Datalayer) -> base_models.BigFileAccessGrant:
         """Return temporary credentials for reading this big file."""
         return datalayer.generate_bigfile_access_grant(self)
+
+    def record_digest(
+        self, datalayer: Datalayer | None = None, *, stream: bool = False
+    ) -> bool:
+        """Record what the bytes are, as far as that is cheap -- or, with ``stream``, whatever it costs.
+
+        The sample is always read here (three windows). The digest is taken from the object
+        store's verified checksum when the upload made one this definition can read
+        (:func:`digest.digest_from_checksum`); otherwise the object is streamed once, when it
+        is small (:attr:`inline_digest_bytes`) or ``stream`` says to, and left owed when not.
+
+        Returns:
+            Whether the store now has its digest.
+
+        Raises:
+            FileNotFoundError: If there is no object.
+            ValueError: If the object is not the size it was measured at.
+        """
+        layer = datalayer or Datalayer()
+        checksum, size = layer.object_checksum(self.bucket, self.key)
+        fields = ["size_bytes", "sample"]
+        self.size_bytes = size
+        self.sample = digests.sample_of(
+            size,
+            lambda start, length: layer.read_object_range(
+                self.bucket, self.key, start, length
+            ),
+        )
+        found = digests.digest_from_checksum(checksum, size)
+        if found is None and (stream or size <= self.inline_digest_bytes):
+            found = layer.object_digest(self.bucket, self.key, size)
+        if found is not None:
+            self.digest = found
+            self.digest_algorithm = digests.ALGORITHM
+            self.digested_at = timezone.now()
+            fields += ["digest", "digest_algorithm", "digested_at"]
+        self.save(update_fields=fields)
+        return found is not None
+
+    def try_record_digest(self, datalayer: Datalayer | None = None) -> None:
+        """:meth:`record_digest`, as a finish does it: a failure leaves the digest owed and the upload finished."""
+        if self.digest is not None:
+            return
+        try:
+            self.record_digest(datalayer)
+        except Exception:
+            logger.warning(
+                "BigFileStore %s was finished, but its digest could not be recorded; `digest_bigfiles` will try again.",
+                self.pk,
+                exc_info=True,
+            )
 
     def get_access_grant(self, datalayer: Datalayer) -> base_models.BigFileAccessGrant:
         """Return temporary credentials for reading the object."""
@@ -321,6 +413,7 @@ class BigFileStore(DatalayerStore):
         self.size_bytes = self.measure_declared(layer)
         self.populated = True
         self.save(update_fields=["path", "populated", "size_bytes"])
+        self.try_record_digest(layer)
 
 
 class MediaStore(DatalayerStore):
