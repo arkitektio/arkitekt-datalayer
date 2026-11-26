@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v3.1.0 (2026-11-26)
+
+### Features
+
+- A big file knows what its bytes are (digest and sample)
+  ([`27076f1`](https://github.com/arkitektio/arkitekt-datalayer/commit/27076f1da6f260b40a85c2ce0a800135adbc512d))
+
+- Digest_bigfiles stops at a deadline
+  ([`8cdc282`](https://github.com/arkitektio/arkitekt-datalayer/commit/8cdc2820f7f5405b1a15afef32039f28f5161fb8))
+
+
 ## v3.0.1 (2026-11-23)
 
 ### Bug Fixes
