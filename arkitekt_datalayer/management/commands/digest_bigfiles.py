@@ -9,14 +9,17 @@ object once.
 Long-running on a hub with much data (it reads every byte it owes), so it is not a setup job:
 the service serves meanwhile, and a store without a digest is simply one not known yet. Safe
 to interrupt and to run again: each store is recorded as soon as it is hashed, and a run
-starts with what is still owed. ``--backlog`` reads only the database and says what is owed.
+starts with what is still owed. ``--backlog`` reads only the database and says what is owed,
+and ``--until`` stops it from starting another file after a time: what is left stays owed.
 """
 
+import datetime
 import json
 from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.db.models import Count, Q, Sum
+from django.utils import timezone
 
 from arkitekt_datalayer.datalayer import get_current_datalayer
 from arkitekt_datalayer.models import BigFileStore
@@ -44,6 +47,13 @@ class Command(BaseCommand):
             help="Print what is owed as JSON ({items, bytes}) and change nothing. Reads only the database.",
         )
         parser.add_argument(
+            "--until",
+            type=datetime.datetime.fromisoformat,
+            default=None,
+            metavar="WHEN",
+            help="Start no store after this time (ISO 8601): what is left stays owed for the next run. A scheduled run is passed its window's end.",
+        )
+        parser.add_argument(
             "--limit",
             type=int,
             default=None,
@@ -65,8 +75,16 @@ class Command(BaseCommand):
         if options["limit"]:
             stores = stores[: options["limit"]]
 
+        until = options["until"]
+        if until is not None and until.tzinfo is None:
+            until = until.astimezone()  # a time without a zone is the host's local time
         recorded = failed = 0
         for store in stores.iterator():
+            if until is not None and timezone.now() >= until:
+                self.stdout.write(
+                    f"Reached the deadline ({until.isoformat()}); the rest stays owed."
+                )
+                break
             try:
                 store.record_digest(layer, stream=True)
             except Exception as error:  # one unreadable object must not stop the rest

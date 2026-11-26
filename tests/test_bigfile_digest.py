@@ -142,3 +142,29 @@ async def test_a_large_upload_without_checksums_is_owed_to_the_job(
     assert await sync_to_async(backlog)() == {"items": 0, "bytes": 0}
     # Run again, it has nothing to do.
     await sync_to_async(call_command)("digest_bigfiles", stdout=StringIO())
+
+
+async def test_the_job_starts_nothing_after_its_deadline(
+    aexecute: Execute,
+    datalayer: Datalayer,
+    client_s3: S3ClientFactory,
+    no_inline_hashing: None,
+) -> None:
+    """A scheduled run is told its window's end: what it did not reach stays owed for the next."""
+    data = os.urandom(digest.PART_FLOOR + 10)
+    grant = await answer(
+        aexecute, REQUEST, {"name": "d.nd2", "size": len(data)}, "requestBigfileUpload"
+    )
+    client_s3(grant).put_object(Bucket=grant["bucket"], Key=grant["key"], Body=data)
+    await answer(aexecute, FINISH, {"id": grant["store"]}, "finishBigfileUpload")
+
+    from asgiref.sync import sync_to_async
+
+    out = StringIO()
+    await sync_to_async(call_command)(
+        "digest_bigfiles", "--until", "2000-01-01T00:00:00+00:00", stdout=out
+    )
+
+    store = await models.BigFileStore.objects.aget(id=grant["store"])
+    assert store.digest is None
+    assert "Reached the deadline" in out.getvalue()
